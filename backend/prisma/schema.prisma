@@ -1,0 +1,281 @@
+// GQ (Gateway Quest) - Node/TypeScript Prisma client for the `gq_*` tables.
+//
+// These tables live in BQ's shared Postgres database (DATABASE_URL points at the same
+// physical database bq/backend and eq/backend use - see their own core/database.py /
+// core/config.py), not a separate GQ database. This mirrors the existing aq_/bq_-style
+// convention: every app carries its own generated Prisma client, but they share one
+// physical schema. GQ's REST-API access to `property`/`aq_users` etc. still goes
+// through BQ's/EQ's HTTP APIs (see src/clients/bq/bq.client.ts) - this schema does not
+// declare those models, since GQ never queries them directly via Prisma.
+//
+// Model definitions below were adopted verbatim from an in-progress (uncommitted)
+// schema found in the "QUEST - Copy" working tree, per explicit direction - not
+// independently designed. `gq_user` is the one exception: it did not exist in that
+// source and was added here to satisfy this integration's explicit requirement that
+// GQ persist only a bq_user_id link, never a password.
+//
+// This file must stay in sync with the identical model block appended to
+// bq/backend/app/prisma/schema.prisma, which is the source-of-truth physical DDL.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model gq_user {
+  id         String   @id @default(dbgenerated("(gen_random_uuid())::text"))
+  bq_user_id Int      @unique
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now())
+}
+
+model gq_account_config {
+  id             String   @id @default(dbgenerated("(gen_random_uuid())::text"))
+  bq_property_id Int?
+  webhook_url    String
+  webhook_secret String
+  api_key        String
+  environment    String
+  cx_webhook_id  String?  @unique
+  is_active      Boolean  @default(true)
+  send_data      Boolean  @default(false)
+  created_at     DateTime @default(now())
+  updated_at     DateTime @default(now())
+}
+
+model gq_channel {
+  id                 String               @id @default(dbgenerated("(gen_random_uuid())::text"))
+  bq_property_id     Int
+  title              String
+  channel            String
+  currency           String               @db.VarChar(3)
+  group_id           String?
+  is_active          Boolean              @default(true)
+  state              String?
+  hotel_id           String?
+  pricing_type       String?              @default("standard")
+  send_booking_email Boolean?             @default(false)
+  cx_channel_id      String               @unique
+  created_at         DateTime             @default(now())
+  updated_at         DateTime             @default(now())
+  gq_channel_mapping gq_channel_mapping[]
+}
+
+model gq_channel_mapping {
+  id              String     @id @default(dbgenerated("(gen_random_uuid())::text"))
+  channel_id      String
+  bq_room_type_id Int
+  rate_plan_id    String
+  ota_room_code   String
+  ota_rate_code   String
+  cx_mapping_id   String     @unique
+  gq_channel      gq_channel @relation(fields: [channel_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_gq_channel_mapping_channel")
+
+  @@index([channel_id], map: "idx_gq_channel_mapping_channel_id")
+}
+
+model gq_rate_plan {
+  id                       String                @id @default(dbgenerated("(gen_random_uuid())::text"))
+  bq_property_id           Int
+  bq_room_type_id          Int
+  name                     String
+  cx_title                 String?
+  currency                 String                @db.VarChar(3)
+  sell_mode                String                @default("per_room")
+  rate_mode                String                @default("manual")
+  meal_type                String?               @default("none")
+  parent_rate_plan_id      String?
+  children_fee             Decimal?              @default(0) @db.Decimal
+  infant_fee               Decimal?              @default(0) @db.Decimal
+  inherit_rate             Boolean               @default(false)
+  inherit_stop_sell        Boolean               @default(false)
+  inherit_min_stay_arrival Boolean               @default(false)
+  inherit_max_stay         Boolean               @default(false)
+  is_default               Boolean               @default(false)
+  cx_rate_plan_id          String?               @unique
+  created_at               DateTime              @default(now())
+  updated_at               DateTime              @default(now())
+  gq_rate_plan             gq_rate_plan?         @relation("gq_rate_planTogq_rate_plan", fields: [parent_rate_plan_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_gq_rate_plan_parent")
+  other_gq_rate_plan       gq_rate_plan[]        @relation("gq_rate_planTogq_rate_plan")
+  gq_rate_plan_option      gq_rate_plan_option[]
+  gq_rate_restriction      gq_rate_restriction[]
+
+  @@index([parent_rate_plan_id], map: "idx_gq_rate_plan_parent_rate_plan_id")
+}
+
+model gq_rate_plan_option {
+  id                  String       @id @default(dbgenerated("(gen_random_uuid())::text"))
+  rate_plan_id        String
+  occupancy           Int
+  is_primary          Boolean      @default(false)
+  rate                Int?
+  increase_by_percent Int?
+  decrease_by_amount  Int?
+  gq_rate_plan        gq_rate_plan @relation(fields: [rate_plan_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_gq_rate_plan_option_rate_plan")
+
+  @@index([rate_plan_id], map: "idx_gq_rate_plan_option_rate_plan_id")
+}
+
+model gq_rate_restriction {
+  id                  String       @id @default(dbgenerated("(gen_random_uuid())::text"))
+  bq_property_id      Int
+  rate_plan_id        String
+  date                DateTime     @db.Date
+  rate                Int
+  min_stay_arrival    Int?
+  min_stay_through    Int?
+  min_stay            Int?
+  max_stay            Int?
+  closed_to_arrival   Boolean?     @default(false)
+  closed_to_departure Boolean?     @default(false)
+  stop_sell           Boolean?     @default(false)
+  created_at          DateTime     @default(now())
+  updated_at          DateTime     @default(now())
+  gq_rate_plan        gq_rate_plan @relation(fields: [rate_plan_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_gq_rate_restriction_rate_plan")
+
+  @@unique([rate_plan_id, date], map: "uq_gq_rate_restriction_rate_plan_date")
+  @@index([bq_property_id, date], map: "idx_gq_rate_restriction_property_date")
+  @@index([rate_plan_id], map: "idx_gq_rate_restriction_rate_plan_id")
+}
+
+model gq_availability_snapshot {
+  id              String   @id @default(dbgenerated("(gen_random_uuid())::text"))
+  bq_property_id  Int
+  bq_room_type_id Int
+  date            DateTime @db.Date
+  available_rooms Int
+  updated_at      DateTime @default(now())
+
+  @@unique([bq_room_type_id, date], map: "uq_gq_availability_snapshot_room_date")
+  @@index([bq_property_id], map: "idx_gq_availability_snapshot_property")
+  @@index([bq_room_type_id], map: "idx_gq_availability_snapshot_room_type")
+}
+
+model gq_ota_booking {
+  id                      String                    @id @default(dbgenerated("(gen_random_uuid())::text"))
+  bq_orderid              String?
+  bq_bookingid            String?
+  cx_booking_id           String                    @unique
+  ota_name                String
+  unique_id               String
+  status                  String
+  currency                String                    @db.VarChar(3)
+  created_at              DateTime                  @default(now())
+  updated_at              DateTime                  @default(now())
+  gq_ota_booking_revision gq_ota_booking_revision[]
+}
+
+model gq_ota_booking_revision {
+  id                  String                @id @default(dbgenerated("(gen_random_uuid())::text"))
+  ota_booking_id      String
+  cx_revision_id      String                @unique
+  status              String
+  arrival_date        DateTime              @db.Date
+  departure_date      DateTime              @db.Date
+  amount_minor_units  Int
+  currency            String                @db.VarChar(3)
+  guest_name          String?
+  received_at         DateTime
+  acked_at            DateTime?
+  ack_status          String                @default("pending")
+  blocking_reason     String?
+  gq_ota_booking      gq_ota_booking        @relation(fields: [ota_booking_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_gq_ota_booking_revision_booking")
+  gq_ota_booking_room gq_ota_booking_room[]
+
+  @@index([ota_booking_id], map: "idx_gq_ota_booking_revision_booking")
+}
+
+model gq_ota_booking_room {
+  id                      String                  @id @default(dbgenerated("(gen_random_uuid())::text"))
+  revision_id             String
+  bq_room_type_id         Int?
+  rate_plan_id            String?
+  amount                  Int
+  checkin_date            DateTime                @db.Date
+  checkout_date           DateTime                @db.Date
+  ota_unique_id           String?
+  occ_adults              Int                     @default(0)
+  occ_children            Int                     @default(0)
+  occ_infants             Int                     @default(0)
+  gq_ota_booking_guest    gq_ota_booking_guest[]
+  gq_ota_booking_revision gq_ota_booking_revision @relation(fields: [revision_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_gq_ota_booking_room_revision")
+  gq_ota_tax              gq_ota_tax[]
+
+  @@index([rate_plan_id], map: "idx_gq_ota_booking_room_rate_plan")
+  @@index([revision_id], map: "idx_gq_ota_booking_room_revision")
+  @@index([bq_room_type_id], map: "idx_gq_ota_booking_room_room_type")
+}
+
+model gq_ota_booking_guest {
+  id                  String              @id @default(dbgenerated("(gen_random_uuid())::text"))
+  room_id             String
+  firstname           String
+  lastname            String
+  gq_ota_booking_room gq_ota_booking_room @relation(fields: [room_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_gq_ota_booking_guest_room")
+
+  @@index([room_id], map: "idx_gq_ota_booking_guest_room")
+}
+
+model gq_ota_tax {
+  id                  String              @id @default(dbgenerated("(gen_random_uuid())::text"))
+  room_id             String
+  name                String
+  amount              Decimal             @db.Decimal
+  is_inclusive        Boolean             @default(false)
+  gq_ota_booking_room gq_ota_booking_room @relation(fields: [room_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_gq_ota_tax_room")
+
+  @@index([room_id], map: "idx_gq_ota_tax_room")
+}
+
+model gq_push_task {
+  id         String   @id @default(dbgenerated("(gen_random_uuid())::text"))
+  task_type  String
+  cx_task_id String
+  status     String   @default("pending")
+  warnings   Json?
+  created_at DateTime @default(now())
+
+  @@index([cx_task_id], map: "idx_gq_push_task_cx_task_id")
+  @@index([status], map: "idx_gq_push_task_status")
+}
+
+model gq_api_log {
+  id          String   @id @default(dbgenerated("(gen_random_uuid())::text"))
+  method      String
+  endpoint    String
+  http_status Int
+  latency_ms  Int
+  created_at  DateTime @default(now())
+
+  @@index([created_at], map: "idx_gq_api_log_created_at")
+  @@index([endpoint], map: "idx_gq_api_log_endpoint")
+}
+
+model gq_webhook_log {
+  id                   String    @id @default(dbgenerated("(gen_random_uuid())::text"))
+  event                String
+  ref                  String
+  attempt              Int       @default(1)
+  http_status_returned Int?
+  received_at          DateTime  @default(now())
+  next_retry_at        DateTime?
+
+  @@index([next_retry_at], map: "idx_gq_webhook_log_next_retry")
+  @@index([ref], map: "idx_gq_webhook_log_ref")
+}
+
+model gq_error_queue {
+  id            String   @id @default(dbgenerated("(gen_random_uuid())::text"))
+  source        String
+  payload       Json
+  error_message String
+  retry_count   Int      @default(0)
+  created_at    DateTime @default(now())
+
+  @@index([created_at], map: "idx_gq_error_queue_created_at")
+  @@index([retry_count], map: "idx_gq_error_queue_retry_count")
+}
