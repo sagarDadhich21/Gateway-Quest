@@ -1,9 +1,8 @@
 import { useState } from "react";
-import { MockDataNotice } from "../components/MockDataNotice";
+import { NotAvailableNotice } from "../components/NotAvailableNotice";
 import { PageHeader } from "../components/PageHeader";
 import { Toggle } from "../components/Toggle";
 
-/** Field names/defaults match state.settings in the source mock exactly. */
 export function Settings() {
   const [availabilityOversellGuard, setAvailabilityOversellGuard] = useState(true);
   const [nightlyFullRefresh, setNightlyFullRefresh] = useState(true);
@@ -21,7 +20,7 @@ export function Settings() {
   return (
     <div>
       <PageHeader title="Settings" description="Pipeline guards, batching and acknowledgement behaviour" />
-      <MockDataNotice />
+      <NotAvailableNotice />
 
       <div className="card settings-card">
         <div className="settings-row">

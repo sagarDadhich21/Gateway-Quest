@@ -1,4 +1,4 @@
-import { BqProperty } from "../../clients/bq/bq.types";
+import { BqProperty, BqRoomType } from "../../clients/bq/bq.types";
 
 /**
  * What the GQ UI actually needs to show a property. Deliberately excludes BQ-internal
@@ -29,6 +29,33 @@ export interface PropertyResponseDto {
   };
 }
 
+/** What the GQ UI needs to render a room type picker/list - name, occupancy and physical count from BQ, plus Channex onboarding status. */
+export interface RoomTypeSummaryDto {
+  id: number;
+  name: string;
+  maxOccupancy: number;
+  totalRooms: number;
+  channex: {
+    onboarded: boolean;
+    roomTypeId: string | null;
+  };
+}
+
+export function toRoomTypeSummaryDto(bqRoomType: BqRoomType, totalRooms: number): RoomTypeSummaryDto {
+  return {
+    id: bqRoomType.roomtypeid,
+    name: bqRoomType.roomtypename,
+    maxOccupancy: bqRoomType.max_occupancy,
+    totalRooms,
+    channex: {
+      // `!== null` isn't enough here - BQ has real rows where this was cleared to an
+      // empty string rather than SQL NULL, which would otherwise read as "onboarded".
+      onboarded: Boolean(bqRoomType.cx_room_type_id),
+      roomTypeId: bqRoomType.cx_room_type_id || null,
+    },
+  };
+}
+
 export function toPropertyResponseDto(bqProperty: BqProperty): PropertyResponseDto {
   return {
     id: bqProperty.propertyid,
@@ -44,8 +71,9 @@ export function toPropertyResponseDto(bqProperty: BqProperty): PropertyResponseD
     zipCode: bqProperty.zip_code,
     timeZone: bqProperty.time_zone,
     channex: {
-      onboarded: bqProperty.cx_property_id !== null,
-      propertyId: bqProperty.cx_property_id,
+      // Same empty-string-vs-null caveat as toRoomTypeSummaryDto above.
+      onboarded: Boolean(bqProperty.cx_property_id),
+      propertyId: bqProperty.cx_property_id || null,
     },
   };
 }

@@ -1,13 +1,18 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Icon } from "../components/Icon";
 import { useToast } from "../components/toast/ToastContext";
-
-const CURRENT_USER = { name: "Gateway Admin", email: "admin@rhombusquest.com" };
+import { clearSession, getSession } from "../auth/session";
 
 export function UserMenu() {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const toast = useToast();
+  const navigate = useNavigate();
+
+  const session = getSession();
+  const email = session?.email ?? "unknown@quest.io";
+  const displayName = email.split("@")[0];
 
   useEffect(() => {
     function onClickOutside(e: MouseEvent) {
@@ -21,7 +26,9 @@ export function UserMenu() {
 
   function logout() {
     setOpen(false);
+    clearSession();
     toast("Logged out", "ok");
+    navigate("/login", { replace: true });
   }
 
   return (
@@ -29,18 +36,18 @@ export function UserMenu() {
       <button
         type="button"
         className="user-menu__avatar"
-        title={CURRENT_USER.name}
+        title={displayName}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
       >
-        {CURRENT_USER.name.charAt(0).toUpperCase()}
+        {displayName.charAt(0).toUpperCase()}
       </button>
       {open && (
         <div className="user-menu__panel" role="menu">
           <div className="user-menu__header">
-            <div className="user-menu__name">{CURRENT_USER.name}</div>
-            <div className="user-menu__email">{CURRENT_USER.email}</div>
+            <div className="user-menu__name">{displayName}</div>
+            <div className="user-menu__email">{email}</div>
           </div>
           <button type="button" className="user-menu__logout" role="menuitem" onClick={logout}>
             <Icon name="log-out" size="sm" /> Log out

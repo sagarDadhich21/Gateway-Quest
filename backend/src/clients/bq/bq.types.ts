@@ -124,3 +124,12 @@ export interface BqRoomTypeChannexMappingPatchResponse {
   roomtypeid: number;
   cx_room_type_id: string | null;
 }
+
+/** One (room type, date) availability reading, assembled by looping GET /bq/api/availability/check-dates/all one night at a time - see getBqAvailabilityForDateRange. */
+export interface BqDailyAvailability {
+  roomTypeId: number;
+  date: string; // YYYY-MM-DD
+  totalRooms: number;
+  bookedRooms: number;
+  availableRooms: number;
+}

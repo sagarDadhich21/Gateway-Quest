@@ -1,6 +1,5 @@
 import { Icon } from "../components/Icon";
 import { useModal } from "../components/modal/ModalContext";
-import { CX } from "../mockData/core";
 
 /** Content ported verbatim from openHelp() in the source (lines 944-965). */
 export function HelpButton() {
@@ -43,7 +42,7 @@ export function HelpButton() {
               A <span className="mono">200 OK</span> can still contain per-row warnings — those rows are rejected and
               land in the Error Queue.
             </li>
-            <li>Rate and availability limits are roughly 10 requests per minute, per property, and each message must stay under {CX.maxMessageMb}MB.</li>
+            <li>Rate and availability limits are roughly 10 requests per minute, per property, and each message must stay under 1MB.</li>
             <li>Rate limiting returns <span className="mono">429</span>; webhook retries back off over 11 attempts, up to roughly 24 hours.</li>
           </ul>
         </>

@@ -1,4 +1,5 @@
-import { FormEvent, useState } from "react";
+import { useEffect, useState } from "react";
+import { useCurrentPropertyId } from "../auth/useCurrentProperty";
 import { extractErrorMessage } from "../api/client";
 import { getProperty, onboardProperty } from "../api/gqApi";
 import { PropertyResponse } from "../api/types";
@@ -18,29 +19,21 @@ const DETAIL_FIELDS: Array<{ label: string; key: keyof PropertyResponse }> = [
   { label: "Time zone", key: "timeZone" },
 ];
 
-/**
- * The one real, functional page in this app - live BQ data via gq/backend, not mock
- * data. There is no login in this frontend, so the property id is entered manually
- * rather than read off a session. The gq/backend endpoints this calls still require a
- * Bearer token (see backend/src/middleware/authenticate.ts) - without one, these calls
- * will come back as a 401 UNAUTHENTICATED error, which is expected until a login flow
- * exists again, not a bug in this page.
- */
+/** Live BQ data via gq/backend - the property id comes from the logged-in user's own session, same as every other real-data page. */
 export function PropertyPage() {
-  const [propertyIdInput, setPropertyIdInput] = useState("");
-  const [propertyId, setPropertyId] = useState<number | null>(null);
+  const propertyId = useCurrentPropertyId();
   const [property, setProperty] = useState<PropertyResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [onboarding, setOnboarding] = useState(false);
   const [onboardError, setOnboardError] = useState<string | null>(null);
 
-  async function loadProperty(id: number) {
+  async function loadProperty() {
+    if (propertyId === null) return;
     setLoading(true);
     setLoadError(null);
-    setProperty(null);
     try {
-      const data = await getProperty(id);
+      const data = await getProperty(propertyId);
       setProperty(data);
     } catch (err) {
       setLoadError(extractErrorMessage(err));
@@ -49,16 +42,10 @@ export function PropertyPage() {
     }
   }
 
-  function handleSubmit(event: FormEvent) {
-    event.preventDefault();
-    const id = Number(propertyIdInput);
-    if (!Number.isInteger(id) || id <= 0) {
-      setLoadError("Enter a valid property id.");
-      return;
-    }
-    setPropertyId(id);
-    void loadProperty(id);
-  }
+  useEffect(() => {
+    void loadProperty();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [propertyId]);
 
   async function handleOnboard() {
     if (propertyId === null) return;
@@ -66,7 +53,7 @@ export function PropertyPage() {
     setOnboardError(null);
     try {
       await onboardProperty(propertyId);
-      await loadProperty(propertyId);
+      await loadProperty();
     } catch (err) {
       setOnboardError(extractErrorMessage(err));
     } finally {
@@ -74,27 +61,26 @@ export function PropertyPage() {
     }
   }
 
+  if (propertyId === null) {
+    return (
+      <div>
+        <PageHeader title="My Property" description="Live data from BQ." />
+        <div className="card">
+          <p className="muted">Your account has no assigned property, so there is nothing to load here.</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
-      <PageHeader title="My Property" description="Live data from BQ — the only page here that isn't a mockup." />
+      <PageHeader title="My Property" description="Live data from BQ." />
 
-      <form className="card" onSubmit={handleSubmit} style={{ marginBottom: 20 }}>
-        <label className="field" style={{ maxWidth: 240 }}>
-          <span className="field__label">BQ property id</span>
-          <input
-            className="field__input"
-            type="number"
-            min={1}
-            value={propertyIdInput}
-            onChange={(e) => setPropertyIdInput(e.target.value)}
-            placeholder="e.g. 1"
-            required
-          />
-        </label>
-        <button type="submit" className="button button--primary" disabled={loading}>
-          {loading ? "Loading..." : "Load property"}
-        </button>
-      </form>
+      {loading && !property && (
+        <div className="card" style={{ marginBottom: 20 }}>
+          <p className="muted">Loading…</p>
+        </div>
+      )}
 
       {loadError && (
         <div className="card" style={{ marginBottom: 20 }}>

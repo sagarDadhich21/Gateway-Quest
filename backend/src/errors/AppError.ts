@@ -17,8 +17,13 @@ export type AppErrorCode =
   | "PROPERTY_MISSING_CHANNEX_FIELDS"
   | "ROOM_TYPE_NOT_FOUND"
   | "RATE_PLAN_NOT_FOUND"
+  | "UNMAPPED_ROOM_TYPES"
+  | "UNMAPPED_RATE_PLAN"
+  | "OVERSELL_GUARD"
   | "BQ_UPSTREAM_ERROR"
   | "BQ_UPSTREAM_UNAVAILABLE"
+  | "PRICING_SERVICE_UPSTREAM_ERROR"
+  | "PRICING_SERVICE_UPSTREAM_UNAVAILABLE"
   | "CHANNEX_UPSTREAM_ERROR"
   | "CHANNEX_UPSTREAM_UNAVAILABLE"
   | "CHANNEX_WARNINGS"
@@ -66,4 +71,30 @@ export function roomTypeNotFoundError(): AppError {
 
 export function ratePlanNotFoundError(): AppError {
   return new AppError("RATE_PLAN_NOT_FOUND", 404, "Rate plan not found.");
+}
+
+export function unmappedRoomTypesError(roomTypeNames: string[]): AppError {
+  return new AppError(
+    "UNMAPPED_ROOM_TYPES",
+    422,
+    "Cannot push availability for room type(s) with no Channex room_type_id mapping.",
+    { unmappedRoomTypes: roomTypeNames }
+  );
+}
+
+export function unmappedRatePlanError(): AppError {
+  return new AppError(
+    "UNMAPPED_RATE_PLAN",
+    422,
+    "This rate plan is not onboarded to Channex - map it before pushing restrictions."
+  );
+}
+
+export function oversellGuardError(details: unknown): AppError {
+  return new AppError(
+    "OVERSELL_GUARD",
+    422,
+    "Availability requested exceeds the room type's physical room count.",
+    details
+  );
 }

@@ -1,90 +1,113 @@
 import { useState } from "react";
+import { useCurrentPropertyId } from "../../auth/useCurrentProperty";
 import { DataTable, DataTableColumn } from "../../components/DataTable";
-import { MockDataNotice } from "../../components/MockDataNotice";
 import { PageHeader } from "../../components/PageHeader";
-import { Pill, PillTone } from "../../components/Pill";
 import { useModal } from "../../components/modal/ModalContext";
 import { useToast } from "../../components/toast/ToastContext";
-import { propById, propName, ratePlanById } from "../../mockData/channexMiddleware";
-import { RatePushRow, ratePushRows } from "../../mockData/distribution";
-import { money } from "../../lib/format";
-
-const STATUS_TONE: Record<RatePushRow["status"], PillTone> = {
-  "In sync": "success",
-  "Pending push": "warning",
-  Blocked: "error",
-  Rejected: "error",
-};
+import { defaultDateRange } from "../../lib/dateRange";
+import { displayDate, money } from "../../lib/format";
+import { RestrictionRow } from "../../api/types";
+import { buildRestrictionModal, emptyRestrictionForm, RestrictionFormValues } from "./PushRestrictionModal";
+import { useRestrictionsData } from "./useRestrictionsData";
 
 export function RatesPush() {
-  const [rows, setRows] = useState<RatePushRow[]>(ratePushRows);
-  const { showModal, confirm, closeModal } = useModal();
+  const propertyId = useCurrentPropertyId();
+  const [range] = useState(defaultDateRange());
+  const { ratePlans, restrictions, loading, error, reload } = useRestrictionsData(propertyId, range.dateFrom, range.dateTo);
+  const { showModal, closeModal } = useModal();
   const toast = useToast();
 
-  const ready = rows.filter((r) => r.status === "Pending push");
-
-  function previewBatch() {
-    const payload = {
-      values: ready.map((r) => ({
-        property_id: propById(r.pid)?.cxId ?? "<not onboarded>",
-        rate_plan_id: ratePlanById(r.rpId)?.cxId ?? "<not mapped>",
-        date_from: r.dateFrom,
-        date_to: r.dateTo,
-        rate: r.eqValue,
-      })),
-    };
-    showModal({
-      title: "Preview batch — POST /restrictions",
-      wide: true,
-      body: (
-        <pre className="mono small" style={{ whiteSpace: "pre-wrap", margin: 0 }}>
-          {JSON.stringify(payload, null, 2)}
-        </pre>
-      ),
-      foot: <button type="button" className="button button--ghost" onClick={closeModal}>Close</button>,
-    });
+  function ratePlanName(id: string): string {
+    return ratePlans.find((rp) => rp.id === id)?.name ?? id;
+  }
+  function ratePlanCurrency(id: string): string | null {
+    return ratePlans.find((rp) => rp.id === id)?.currency ?? null;
   }
 
-  function pushAll() {
-    if (!ready.length) {
-      toast("Nothing ready to push.", "warn");
+  function openPushModal() {
+    if (propertyId === null) return;
+    if (!ratePlans.length) {
+      toast("No rate plans yet — create one first.", "warn");
       return;
     }
-    confirm(
-      `Push ${ready.length} row(s) to Channex?`,
-      "This sends every ready row straight to Channex, which fans it out to every mapped OTA channel immediately.",
-      () => {
-        setRows((prev) => prev.map((r) => (r.status === "Pending push" ? { ...r, status: "In sync", cxValue: r.eqValue } : r)));
-        toast(`Pushed ${ready.length} row(s) to Channex`);
-      }
+    let form: RestrictionFormValues = emptyRestrictionForm(
+      ratePlans.find((rp) => rp.channex.onboarded)?.id ?? ratePlans[0].id,
+      range.dateFrom
     );
+    let submitting = false;
+
+    function rerender() {
+      showModal(
+        buildRestrictionModal({
+          form,
+          ratePlans,
+          propertyId: propertyId as number,
+          submitting,
+          setForm: (f) => {
+            form = f;
+          },
+          setSubmitting: (v) => {
+            submitting = v;
+          },
+          onSuccess: () => {
+            closeModal();
+            toast("Rate pushed to Channex.");
+            void reload();
+          },
+          onError: (message) => {
+            toast(message, "err");
+            rerender();
+          },
+          onClose: closeModal,
+          rerender,
+        })
+      );
+    }
+
+    rerender();
   }
 
-  const columns: DataTableColumn<RatePushRow>[] = [
-    { key: "pid", label: "Property", render: (r) => propName(r.pid) },
-    { key: "rpId", label: "Rate plan", render: (r) => ratePlanById(r.rpId)?.eqName ?? r.rpId },
-    { key: "dateFrom", label: "From", render: (r) => r.dateFrom },
-    { key: "dateTo", label: "To", render: (r) => r.dateTo },
-    { key: "eqValue", label: "EQ rate", align: "right", render: (r) => money(r.eqValue, propById(r.pid)?.currency) },
-    { key: "cxValue", label: "Channex rate", align: "right", render: (r) => money(r.cxValue, propById(r.pid)?.currency) },
-    { key: "status", label: "Status", render: (r) => <Pill label={r.status} tone={STATUS_TONE[r.status]} /> },
+  const columns: DataTableColumn<RestrictionRow>[] = [
+    { key: "rpId", label: "Rate plan", render: (r) => ratePlanName(r.ratePlanId) },
+    { key: "date", label: "Date", render: (r) => displayDate(r.date) },
+    { key: "rate", label: "Rate", align: "right", render: (r) => money(r.rate, ratePlanCurrency(r.ratePlanId)) },
+    { key: "updatedAt", label: "Last pushed", render: (r) => new Date(r.updatedAt).toLocaleString() },
   ];
+
+  if (propertyId === null) {
+    return (
+      <div>
+        <PageHeader title="Rates Push" description="POST /ari/restrictions — rate values at rate-plan level" />
+        <div className="card">
+          <p className="muted">Your account has no assigned property, so there is nothing to load here.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
       <PageHeader
         title="Rates Push"
-        description="POST /restrictions — rate values at rate-plan level"
+        description={`POST /ari/restrictions — ${displayDate(range.dateFrom)} to ${displayDate(range.dateTo)}, rate value at rate-plan level`}
         actions={
-          <>
-            <button type="button" className="button button--ghost" onClick={previewBatch}>Preview batch</button>
-            <button type="button" className="button button--primary" onClick={pushAll}>Push all ready ({ready.length})</button>
-          </>
+          <button type="button" className="button button--primary" onClick={openPushModal}>
+            Push rate
+          </button>
         }
       />
-      <MockDataNotice />
+      {error && (
+        <div className="card" style={{ marginBottom: 20 }}>
+          <p className="form-error" role="alert">{error}</p>
+        </div>
+      )}
       <div className="card">
-        <DataTable columns={columns} rows={rows} getRowKey={(r) => r.id} />
+        <DataTable
+          columns={columns}
+          rows={restrictions}
+          getRowKey={(r) => `${r.ratePlanId}|${r.date}`}
+          emptyMessage={loading ? "Loading…" : "No rates pushed for this range yet."}
+        />
       </div>
     </div>
   );

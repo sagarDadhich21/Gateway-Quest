@@ -1,5 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
+import { RequireAuth } from "./auth/RequireAuth";
 import { AppLayout } from "./layout/AppLayout";
+import { Login } from "./pages/Login";
 import { Dashboard } from "./pages/Dashboard";
 import { PropertyPage } from "./pages/PropertyPage";
 import { Settings } from "./pages/Settings";
@@ -30,6 +32,9 @@ import { AuditLog } from "./pages/admin/AuditLog";
 export function App() {
   return (
     <Routes>
+      <Route path="/login" element={<Login />} />
+
+      <Route element={<RequireAuth />}>
       <Route element={<AppLayout />}>
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/my-property" element={<PropertyPage />} />
@@ -69,6 +74,7 @@ export function App() {
         <Route path="/settings" element={<Settings />} />
 
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
+      </Route>
       </Route>
 
       <Route path="*" element={<Navigate to="/dashboard" replace />} />

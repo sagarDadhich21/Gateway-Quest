@@ -45,8 +45,9 @@ export function toRatePlanResponseDto(row: RatePlanWithOptions): RatePlanRespons
     parentRatePlanId: row.parent_rate_plan_id,
     isDefault: row.is_default,
     channex: {
-      onboarded: row.cx_rate_plan_id !== null,
-      ratePlanId: row.cx_rate_plan_id,
+      // Same empty-string-vs-null caveat as property.dto.ts's toPropertyResponseDto.
+      onboarded: Boolean(row.cx_rate_plan_id),
+      ratePlanId: row.cx_rate_plan_id || null,
     },
     options: row.gq_rate_plan_option.map((o) => ({
       id: o.id,

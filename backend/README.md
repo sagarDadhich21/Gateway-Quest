@@ -1,125 +1,123 @@
-# Gateway Quest (GQ) backend
+# Gateway Quest (GQ) Backend
 
-Channex.io channel-manager integration middleware. `BQ/HMS ↔ GQ ↔ Channex`.
+Node.js/TypeScript middleware that integrates the HMS (EQ/BQ) monorepo with the
+[Channex.io](https://docs.channex.io) channel manager. GQ sits between BQ (property/room
+data) and Channex: it onboards properties, room types and rate plans to Channex, and
+pushes/reads Availability, Rates & Restrictions (ARI).
 
-BQ remains the source of truth for hotel/property data - GQ never duplicates it. GQ's
-own tables (`gq_*`, see `prisma/schema.prisma`) live in **the same physical database**
-BQ and EQ use - not a separate one - mirroring the `aq_*` convention EQ already
-follows. GQ only stores integration-specific state there: rate plans, restrictions,
-channel mappings, OTA bookings, and API/webhook/error logs. Property onboarding state
-specifically (`cx_property_id`) is **not** duplicated anywhere in `gq_*` - it lives
-only on `BQ.property.cx_property_id`, which GQ reads through BQ's own API.
+GQ owns no property/room-type data of its own - that lives in BQ and is read over BQ's
+existing HTTP API (`src/clients/bq`). GQ only persists its own rate plans, restrictions,
+availability snapshots and integration bookkeeping (the `gq_*` tables, in the **same**
+physical Postgres database BQ/EQ use - not a separate database).
 
-> **Schema provenance:** every `gq_*` model here (except `gq_user`) was adopted from an
-> in-progress, uncommitted schema found in a separate local working copy of this repo
-> ("QUEST - Copy"), per explicit direction, in place of an earlier, independently
-> designed schema. `gq_user` is the one model added fresh, to satisfy this
-> integration's explicit requirement that GQ persist only a `bq_user_id` link and never
-> a password - the adopted source didn't have an equivalent table.
->
-> Two fields on `property` were carried over as-is from that source without their
-> intended meaning being confirmed: `concorded` (a boolean sitting right next to
-> `cx_property_id` - possibly meant as an onboarded flag, but not used as one here
-> since it wasn't confirmed) and `group_id`. Neither is read or written by any code in
-> this phase - onboarded status is derived purely from `cx_property_id !== null`.
+## Stack
 
-## Scope of this phase
+- Node.js + TypeScript + Express
+- Prisma (schema in `prisma/schema.prisma`) for GQ's own `gq_*` tables
+- Zod for request validation
+- Axios for all upstream HTTP calls (BQ, EQ/AQ login, pricing-service, Channex)
 
-- `POST /api/gq/auth/login` - authenticates against BQ/EQ's existing login API
-  (`POST /aq/api/login`), then issues a GQ session token. No password is ever stored
-  in GQ.
-- `GET /api/gq/properties/:propertyId` - returns a UI-safe subset of the BQ property,
-  plus its Channex onboarding state (from `cx_property_id`).
-- `POST /api/gq/properties/:propertyId/onboard` - idempotently creates the property on
-  Channex and stores the returned id on `BQ.property.cx_property_id`. Idempotency is
-  just "does BQ already have a `cx_property_id`?" - there's no separate GQ-side cache
-  of that fact to go stale.
+Deliberately **not** used in this phase: Redis/queues/BullMQ, Docker, CI/CD, ESLint/Prettier/Husky, Swagger.
 
-Only `gq_user` and `gq_api_log` (outbound Channex call logging) are actually used by
-code in this phase. The other 14 `gq_*` tables (rate plans, restrictions, channels,
-OTA bookings, webhook log, error queue, account config, availability snapshots) are
-declared and ready for the next phases of this integration but nothing here queries
-them yet.
-
-## Prerequisites before this runs against anything real
-
-1. **Run the BQ schema migration.** This change adds nullable columns to BQ's
-   `property` table and 16 new `gq_*` tables to `bq/backend/app/prisma/schema.prisma`,
-   and regenerates the BQ Prisma client. This was **not** applied to a live database
-   from here - no `DATABASE_URL`/DB credentials were available, and `prisma db
-   push`/`migrate` against a shared production-adjacent database is not something to
-   run without explicit sign-off. Someone with BQ DB access needs to run
-   `prisma generate` + `prisma db push` (or a proper migration) in `bq/backend`.
-   Per `CHANNEX_INTEGRATION_ANALYSIS.md` section 0.5, `eq` and `pricing-service` carry
-   their own copies of the same schema - mirror this into those two copies as well
-   before either service needs these fields/tables.
-2. **Set `DATABASE_URL`** in `gq/.env` to the *same* connection string
-   `bq/backend/.env` uses - this is one shared database, not two.
-3. **Get a real Channex API key** for the target environment and set
-   `CHANNEX_API_KEY`. `CHANNEX_ENVIRONMENT=staging` uses Channex's documented staging
-   base URL by default; `production` requires `CHANNEX_BASE_URL` to be set explicitly
-   (Channex's production base URL was not confirmed from their own docs during this
-   integration's research - see `CHANNEX_BQ_API_DB_MAPPING.md` section 9). Note:
-   `gq_account_config` exists in the schema for DB-stored, rotatable API keys, but this
-   phase reads `CHANNEX_API_KEY` from the environment instead, per the explicit "secrets
-   must come from environment/configuration" requirement - switching to DB-stored keys
-   is a deliberate follow-up decision, not made here.
-4. **Populate the new BQ property fields** (`currency`, `country`, `city`, `address`,
-   `time_zone` are required by Channex) for any property before calling `/onboard` -
-   this service validates they're present and returns a clear `422
-   PROPERTY_MISSING_CHANNEX_FIELDS` listing what's missing rather than guessing
-   defaults. Populating them is a BQ property-admin concern, out of scope here.
-
-## Known limitations carried over from BQ/EQ, not fixed here
-
-- `POST /aq/api/login` has three other success paths this service doesn't attempt to
-  complete on the caller's behalf: MFA pending, first-login property registration
-  pending, and email-verification pending. Each surfaces as its own clear GQ error
-  (`MFA_REQUIRED`, `PROPERTY_REGISTRATION_REQUIRED`, `EMAIL_VERIFICATION_REQUIRED`)
-  telling the user to finish that step in the existing HMS UI first.
-- BQ's property API (`/bq/api/properties/...`) has no authentication or ownership
-  checks of its own - GQ enforces `aq_users.property_id === propertyId` itself before
-  ever calling BQ. This means BQ's property endpoints are only safe to expose on a
-  network GQ (and nothing untrusted) can reach.
-- `eq/backend/app/api/userManagement/utils/jwt.py` signs BQ/EQ's own login tokens with
-  a hardcoded secret (`"Rohit@~123"`). GQ does not reuse this secret or trust EQ's
-  token at all - GQ signs its own session token with `GQ_JWT_SECRET`. Flagging this
-  because it's a real, unrelated security issue worth fixing separately, not because
-  GQ depends on it.
-
-## Running locally
+## Getting started
 
 ```bash
 npm install
-cp .env.example .env   # fill in real values per "Prerequisites" above
+cp .env.example .env   # then fill in real values, see below
 npm run prisma:generate
-npm run dev
+npm run dev             # ts-node-dev, auto-restarts on change
 ```
 
-`GET /health` returns `{"status":"ok","service":"gq-backend"}` once it's up - this
-does not require a database connection (Prisma connects lazily on first query).
+- `npm run build` — compile to `dist/` (`tsc -p tsconfig.json`)
+- `npm run start` — run the compiled build (`node dist/server.js`)
+- `npm run typecheck` — `tsc --noEmit`, no build output
+- `npm run prisma:generate` — regenerate the Prisma client after any `schema.prisma` change
 
-## Project structure
+The server listens on `GQ_PORT` (default `4000`) and exposes everything under `/api/gq`,
+plus an unauthenticated `GET /health`.
+
+## Environment variables
+
+See `.env.example` for the full annotated list. Key ones:
+
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | Same physical Postgres database as BQ/EQ (`?schema=bq`) - **not** a separate GQ database |
+| `GQ_JWT_SECRET` / `GQ_JWT_EXPIRES_IN_MINUTES` | Signs GQ's own session tokens (distinct from BQ/EQ's JWT secret) |
+| `AQ_BASE_URL` | EQ/AQ service, used only for `POST /aq/api/login` during GQ login |
+| `BQ_BASE_URL` | BQ service - source of truth for property/room-type data |
+| `PRICING_SERVICE_BASE_URL` | pricing-service - source of truth for rates, read during ARI restriction pushes |
+| `CHANNEX_ENVIRONMENT` / `CHANNEX_BASE_URL` / `CHANNEX_API_KEY` | Channex.io API access (`user-api-key` header) |
+| `UPSTREAM_TIMEOUT_MS` | Timeout applied to every outbound HTTP call |
+
+`.env` is gitignored and must never be committed - it holds real secrets locally.
+
+## Project layout
 
 ```
-gq/
-├── prisma/schema.prisma        gq_* tables in BQ's shared database (see provenance note above)
-└── src/
-    ├── config/env.ts           All env vars read and validated here, once
-    ├── modules/
-    │   ├── auth/                POST /api/gq/auth/login
-    │   ├── property/            GET /api/gq/properties/:id (+ the /onboard route, same URL namespace)
-    │   └── channex/             Onboarding orchestration + BQ-property -> Channex payload mapping
-    ├── clients/
-    │   ├── bq/                  axios calls to EQ (login) and BQ (property read/write)
-    │   └── channex/             axios calls to Channex, incl. meta.warnings handling + gq_api_log
-    ├── middleware/               requestId, authenticate, errorHandler, asyncHandler
-    ├── routes/index.ts           Mounts module routers under /api/gq
-    ├── repositories/             Thin Prisma query wrappers (gq_user, gq_api_log)
-    ├── errors/AppError.ts        Typed errors -> HTTP status mapping
-    ├── types/express.d.ts        Request augmentation (correlationId, user)
-    └── app.ts / server.ts
+src/
+  app.ts                 Express app wiring (JSON body parsing, request id, routes, error handler)
+  server.ts              Process entrypoint - starts the HTTP server
+  config/env.ts           Zod-validated environment schema
+  errors/AppError.ts      Typed application errors + factory functions
+  middleware/             authenticate, asyncHandler, errorHandler, requestId
+  services/logger.ts       Structured logging
+  types/express.d.ts       Express Request augmentation (req.user, req.correlationId)
+
+  clients/                 Server-to-server HTTP clients to upstream services
+    bq/                     BQ property/room-type/availability reads, Channex-mapping patches
+    channex/                Channex.io API (property/room-type/rate-plan create, ARI push + read-back)
+    pricingService/         pricing-service rates (GET /dynamic-prices-calendar)
+
+  repositories/             Thin Prisma wrappers, one per gq_* model - no business logic
+  modules/                  One folder per feature: <name>.routes.ts, .service.ts, .schema.ts (Zod), .dto.ts
+    auth/                    GQ login (delegates credential check to EQ/AQ, mints GQ's own JWT)
+    property/                Property read + onboarding endpoints
+    channex/                 BQ -> Channex mapping/payload builders and onboarding orchestration
+    ratePlan/                GQ-owned rate plan CRUD + Channex rate-plan onboarding
+    ari/                     Availability, Rates & Restrictions (ARI) - see below
+
+prisma/schema.prisma        GQ's own gq_* tables (mappings, rate plans, restrictions, snapshots, OTA
+                             bookings, push-task/API/webhook/error logs) - shares BQ's physical database
 ```
 
-Not included in this phase, per explicit scope: Redis, queues/BullMQ, Docker/CI/CD/
-Kubernetes, ESLint/Prettier/Husky, Swagger/OpenAPI.
+## API
+
+All routes below are mounted under `/api/gq`. Every route except `POST /auth/login`
+requires `Authorization: Bearer <token>` from that login response.
+
+### Auth
+- `POST /auth/login` - authenticates against EQ/AQ, mints a GQ session token
+
+### Property & onboarding
+- `GET /properties/:propertyId` - BQ property details + Channex onboarding status
+- `POST /properties/:propertyId/onboard` - onboard a property to Channex (idempotent)
+- `POST /properties/:propertyId/room-types/onboard` - onboard all of a property's room types (idempotent per room type)
+
+### Rate plans (`/rate-plans`)
+- `GET /rate-plans`, `GET /rate-plans/:ratePlanId` - list/read GQ-owned rate plans
+- `POST /rate-plans` - create a rate plan and onboard it to Channex (idempotent by room type + name)
+- `PUT /rate-plans/:ratePlanId` - update local fields/options
+- `DELETE /rate-plans/:ratePlanId` - delete the local rate plan (no confirmed Channex delete endpoint - Channex side is left in place)
+
+### ARI - Availability, Rates & Restrictions
+- `GET /properties/:propertyId/ari` - GQ's own last-known restrictions + availability snapshots for a date range
+- `GET /properties/:propertyId/ari/availability` - live availability read straight from BQ
+- `POST /properties/:propertyId/ari/restrictions` - push rate/min-stay/max-stay/stop-sell values for one rate plan to Channex; `rate` falls back to pricing-service when omitted
+- `POST /properties/:propertyId/ari/availability` - push explicit per-room-type, per-date availability to Channex
+
+ARI pushes are validated before anything is sent to Channex (property/room-type/rate-plan
+must already be mapped to Channex, availability is oversell-guarded against BQ's actual
+room count, rate must be > 0), converted to Channex's minor currency units via
+`src/lib/currency.ts` (never a hardcoded `x100`), and confirmed with a read-back
+immediately after pushing (`verified` in the response) since Channex processes ARI pushes
+asynchronously and documents no task-status endpoint to poll.
+
+## Known upstream limitations
+
+- BQ has no itemized per-day availability endpoint - only a single-night, date-scoped one
+  (`GET /bq/api/availability/check-dates/all`). `getBqAvailabilityForDateRange` calls it
+  once per date in bounded-concurrency batches rather than adding a new BQ endpoint.
+- Channex documents no endpoint to poll an ARI push's task by id/status - GQ instead reads
+  the value straight back via `GET /api/v1/availability` / `GET /api/v1/restrictions`
+  right after pushing, and records the result on the `gq_push_task` row.

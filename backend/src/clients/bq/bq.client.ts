@@ -4,6 +4,7 @@ import { AppError } from "../../errors/AppError";
 import { logger } from "../../services/logger";
 import {
   BqChannexMappingPatchResponse,
+  BqDailyAvailability,
   BqLoginResponse,
   BqProperty,
   BqRoomType,
@@ -165,6 +166,80 @@ export async function getBqRoomTypeCounts(
     }
     throw toUpstreamError(err, "BQ", correlationId);
   }
+}
+
+function* eachDate(dateFrom: string, dateTo: string): Generator<string> {
+  const cursor = new Date(`${dateFrom}T00:00:00Z`);
+  const end = new Date(`${dateTo}T00:00:00Z`);
+  while (cursor <= end) {
+    yield cursor.toISOString().slice(0, 10);
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+}
+
+/** How many single-night BQ calls getBqAvailabilityForDateRange fires concurrently per batch - bounded so a long date range doesn't slam BQ with hundreds of simultaneous requests. */
+const AVAILABILITY_FETCH_CONCURRENCY = 8;
+
+async function fetchAvailabilityForOneDate(
+  propertyId: number,
+  date: string,
+  correlationId: string
+): Promise<BqDailyAvailability[]> {
+  const checkout = new Date(`${date}T00:00:00Z`);
+  checkout.setUTCDate(checkout.getUTCDate() + 1);
+
+  try {
+    const response = await bqHttp.get<BqRoomTypeAvailabilityResponse>(
+      "/bq/api/availability/check-dates/all",
+      { params: { checkin: date, checkout: checkout.toISOString().slice(0, 10), property_id: propertyId } }
+    );
+    return response.data.room_types.map((rt) => ({
+      roomTypeId: rt.roomtypeid,
+      date,
+      totalRooms: rt.total_rooms,
+      bookedRooms: rt.booked_rooms,
+      availableRooms: rt.available_rooms,
+    }));
+  } catch (err) {
+    const axiosErr = err as AxiosError;
+    if (axiosErr.response?.status === 404) {
+      return []; // no room types / no data for this date - not an upstream failure
+    }
+    throw toUpstreamError(err, "BQ", correlationId);
+  }
+}
+
+/**
+ * BQ has no per-day, date-range availability endpoint - the only date-scoped one
+ * (GET /bq/api/availability/check-dates/all) returns one aggregate count for the whole
+ * requested range, not itemized per day (same gap documented in
+ * CHANNEX_BQ_API_DB_MAPPING.md section 4.1). This reuses that same endpoint the way
+ * getBqRoomTypeCounts above already does - a single-night window - but calls it once
+ * per date in the range instead of building a new BQ endpoint, per this phase's
+ * explicit scope (reuse existing APIs only). Dates are fetched in bounded-concurrency
+ * batches (see AVAILABILITY_FETCH_CONCURRENCY) rather than one at a time, so a
+ * multi-week/month range doesn't take one round-trip's latency times the day count.
+ */
+export async function getBqAvailabilityForDateRange(
+  propertyId: number,
+  dateFrom: string,
+  dateTo: string,
+  correlationId: string
+): Promise<BqDailyAvailability[]> {
+  const dates = [...eachDate(dateFrom, dateTo)];
+  const results: BqDailyAvailability[] = [];
+
+  for (let i = 0; i < dates.length; i += AVAILABILITY_FETCH_CONCURRENCY) {
+    const batch = dates.slice(i, i + AVAILABILITY_FETCH_CONCURRENCY);
+    const batchResults = await Promise.all(
+      batch.map((date) => fetchAvailabilityForOneDate(propertyId, date, correlationId))
+    );
+    for (const dayResults of batchResults) {
+      results.push(...dayResults);
+    }
+  }
+
+  return results;
 }
 
 /**

@@ -9,7 +9,7 @@ export function AppLayout() {
       <Sidebar />
       <div className="app-shell__main">
         <header className="app-shell__topbar">
-          <span className="muted small">Preview build — sample data unless noted</span>
+          <span className="muted small"></span>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <HelpButton />
             <UserMenu />

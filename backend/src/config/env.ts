@@ -22,6 +22,7 @@ const envSchema = z
 
     AQ_BASE_URL: z.string().url("AQ_BASE_URL must be a valid URL"),
     BQ_BASE_URL: z.string().url("BQ_BASE_URL must be a valid URL"),
+    PRICING_SERVICE_BASE_URL: z.string().url("PRICING_SERVICE_BASE_URL must be a valid URL"),
 
     CHANNEX_ENVIRONMENT: z.enum(["staging", "production"]).default("staging"),
     CHANNEX_BASE_URL: z.string().url().optional(),
