@@ -63,6 +63,11 @@ export async function findRatePlanByRoomTypeAndName(
   });
 }
 
+/** Resolves a Channex rate_plan_id (from a booking revision) back to the GQ rate plan it belongs to. */
+export async function findRatePlanByCxId(cxRatePlanId: string): Promise<RatePlanWithOptions | null> {
+  return prisma.gq_rate_plan.findUnique({ where: { cx_rate_plan_id: cxRatePlanId }, include: withOptions });
+}
+
 export interface ListRatePlansFilter {
   bqPropertyId?: number;
   bqRoomTypeId?: number;

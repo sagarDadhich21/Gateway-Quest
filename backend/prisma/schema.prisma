@@ -157,6 +157,7 @@ model gq_availability_snapshot {
 
 model gq_ota_booking {
   id                      String                    @id @default(dbgenerated("(gen_random_uuid())::text"))
+  bq_property_id          Int
   bq_orderid              String?
   bq_bookingid            String?
   cx_booking_id           String                    @unique
@@ -170,21 +171,22 @@ model gq_ota_booking {
 }
 
 model gq_ota_booking_revision {
-  id                  String                @id @default(dbgenerated("(gen_random_uuid())::text"))
-  ota_booking_id      String
-  cx_revision_id      String                @unique
-  status              String
-  arrival_date        DateTime              @db.Date
-  departure_date      DateTime              @db.Date
-  amount_minor_units  Int
-  currency            String                @db.VarChar(3)
-  guest_name          String?
-  received_at         DateTime
-  acked_at            DateTime?
-  ack_status          String                @default("pending")
-  blocking_reason     String?
-  gq_ota_booking      gq_ota_booking        @relation(fields: [ota_booking_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_gq_ota_booking_revision_booking")
-  gq_ota_booking_room gq_ota_booking_room[]
+  id                   String                @id @default(dbgenerated("(gen_random_uuid())::text"))
+  ota_booking_id       String
+  cx_revision_id       String                @unique
+  status               String
+  arrival_date         DateTime?             @db.Date
+  departure_date       DateTime?             @db.Date
+  amount_minor_units   Int
+  currency             String                @db.VarChar(3)
+  guest_name           String?
+  received_at          DateTime
+  acked_at             DateTime?
+  ack_status           String                @default("pending")
+  blocking_reason      String?
+  processing_attempts  Int                   @default(0)
+  gq_ota_booking       gq_ota_booking        @relation(fields: [ota_booking_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_gq_ota_booking_revision_booking")
+  gq_ota_booking_room  gq_ota_booking_room[]
 
   @@index([ota_booking_id], map: "idx_gq_ota_booking_revision_booking")
 }
@@ -244,12 +246,14 @@ model gq_push_task {
 }
 
 model gq_api_log {
-  id          String   @id @default(dbgenerated("(gen_random_uuid())::text"))
-  method      String
-  endpoint    String
-  http_status Int
-  latency_ms  Int
-  created_at  DateTime @default(now())
+  id            String   @id @default(dbgenerated("(gen_random_uuid())::text"))
+  method        String
+  endpoint      String
+  http_status   Int
+  latency_ms    Int
+  request_body  Json?
+  response_body Json?
+  created_at    DateTime @default(now())
 
   @@index([created_at], map: "idx_gq_api_log_created_at")
   @@index([endpoint], map: "idx_gq_api_log_endpoint")

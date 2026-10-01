@@ -31,6 +31,12 @@ export function fmt(n: number | null | undefined): string {
   return Number(n).toLocaleString("en-IN");
 }
 
+/** Some OTA revisions (Booking.com cancellations in particular) carry no stay dates at all. */
+export function stayRange(arrivalDate: string | null, departureDate: string | null): string {
+  if (!arrivalDate || !departureDate) return "—";
+  return `${arrivalDate} → ${departureDate}`;
+}
+
 /** `minor` is in minor currency units (paise), matching every rate/amount value in the mock data. */
 export function money(minor: number | null | undefined, currencyCode?: string | null): string {
   if (minor === null || minor === undefined) return "—";

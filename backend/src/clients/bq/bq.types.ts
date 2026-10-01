@@ -133,3 +133,78 @@ export interface BqDailyAvailability {
   bookedRooms: number;
   availableRooms: number;
 }
+
+/**
+ * Types for BQ's real booking endpoints (bq/backend/app/api/checkIn/routes/booking.py,
+ * bookingchange.py, cancelbooking.py - QUEST - Copy), confirmed by reading the live
+ * route/Pydantic-model code directly, not guessed. `booking_type`/`booking_status`/
+ * `fixed_amount` on the request are new optional fields added to BQ's
+ * POST /create-reservation-online-new/ alongside this integration - every other caller
+ * that omits them keeps BQ's original hardcoded behavior unchanged.
+ */
+export interface BqCreateBookingGuest {
+  firstname: string;
+  lastname: string;
+  phonenumber?: number;
+  emailid: string;
+  countrycode?: string;
+  clienttype: "Corporate" | "Leisure";
+  companyid?: string;
+  companyname?: string;
+  contractid?: string;
+  country?: string;
+}
+
+export interface BqCreateBookingDetails {
+  checkindate: string; // YYYY-MM-DD
+  checkoutdate: string; // YYYY-MM-DD
+  room_type: string; // BQ room type NAME (not id) - matched case-insensitively, not property-scoped on BQ's side
+  number_of_guests: number;
+  quantity: number;
+  special_requests?: string;
+  order_id?: string;
+  booking_type?: string; // "OTA" for GQ-originated bookings
+  booking_status?: string; // "Hard" for GQ-originated bookings - BQ's booking_booking_status_check constraint only allows Soft/Hard/Checkedout/Cancelled, no "Confirmed"
+  fixed_amount?: number; // the OTA's actual charged amount - skips BQ's own price recalculation
+}
+
+export interface BqCreateBookingRequest {
+  guest: BqCreateBookingGuest;
+  booking: BqCreateBookingDetails;
+}
+
+/** Only the fields GQ actually reads - BQ's real response carries more (discounts_applied, stay_details, etc.), deliberately not modeled here. */
+export interface BqCreateBookingResponse {
+  message: string;
+  order_id: string;
+  booking_id: string;
+  billing: {
+    billing_id: string;
+    final_amount: number;
+    currency: string;
+  };
+}
+
+/** One row of GET /bq/api/bookings/ (no filter params on BQ's side - filter client-side, same convention as getBqRoomTypes). */
+export interface BqBookingListItem {
+  bookingid: string;
+  orderid: string;
+  guestid: string;
+  firstname: string | null;
+  lastname: string | null;
+  roomid: number | null;
+  checkindate: string | null;
+  checkoutdate: string | null;
+  numberofguests: number;
+  roomtypename: string | null;
+  booking_status: string;
+  booking_type: string | null;
+}
+
+/** Response shape confirmed only partially from cancelbooking.py (several branches for paid/unpaid, >-/<24h) - typed loosely rather than guess every branch. */
+export interface BqCancelBookingResponse {
+  success: boolean;
+  message: string;
+  refund_amount?: number;
+  [key: string]: unknown;
+}

@@ -126,7 +126,7 @@ export function AvailabilityPush() {
   if (propertyId === null) {
     return (
       <div>
-        <PageHeader title="Availability Push" description="POST /ari/availability — batched per property, room-type level" />
+        <PageHeader title="Availability Push" description="  batched per property, room-type level" />
         <div className="card">
           <p className="muted">Your account has no assigned property, so there is nothing to load here.</p>
         </div>
@@ -138,7 +138,7 @@ export function AvailabilityPush() {
     <div>
       <PageHeader
         title="Availability Push"
-        description={`POST /ari/availability — ${displayDate(range.dateFrom)} to ${displayDate(range.dateTo)}, room-type level`}
+        description={` ${displayDate(range.dateFrom)} to ${displayDate(range.dateTo)}, room-type level`}
         actions={
           <>
             <button type="button" className="button button--ghost" onClick={previewBatch} disabled={!ready.length}>

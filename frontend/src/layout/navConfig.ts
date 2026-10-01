@@ -63,7 +63,10 @@ export const NAV_GROUPS: NavGroup[] = [
   },
   {
     title: "Bookings",
-    items: [{ label: "Booking Revisions", path: "/bookings/revisions", icon: "mail" }],
+    items: [
+      { label: "Bookings", path: "/bookings", icon: "list" },
+      { label: "Booking Revisions", path: "/bookings/revisions", icon: "mail" },
+    ],
   },
   {
     title: "Monitoring",

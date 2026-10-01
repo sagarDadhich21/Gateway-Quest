@@ -77,7 +77,7 @@ export function RatesPush() {
   if (propertyId === null) {
     return (
       <div>
-        <PageHeader title="Rates Push" description="POST /ari/restrictions — rate values at rate-plan level" />
+        <PageHeader title="Rates Push" description="rate values at rate-plan level" />
         <div className="card">
           <p className="muted">Your account has no assigned property, so there is nothing to load here.</p>
         </div>
@@ -89,7 +89,7 @@ export function RatesPush() {
     <div>
       <PageHeader
         title="Rates Push"
-        description={`POST /ari/restrictions — ${displayDate(range.dateFrom)} to ${displayDate(range.dateTo)}, rate value at rate-plan level`}
+        description={`${displayDate(range.dateFrom)} to ${displayDate(range.dateTo)}, rate value at rate-plan level`}
         actions={
           <button type="button" className="button button--primary" onClick={openPushModal}>
             Push rate

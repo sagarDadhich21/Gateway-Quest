@@ -7,6 +7,7 @@ export interface ModalOptions {
   /** Defaults to a single "Close" ghost button, matching the source's showModal() default foot. */
   foot?: ReactNode;
   wide?: boolean;
+  extraWide?: boolean;
 }
 
 interface ModalContextValue {
@@ -68,7 +69,11 @@ export function ModalProvider({ children }: { children: ReactNode }) {
             if (e.target === e.currentTarget) closeModal();
           }}
         >
-          <div className={"modal" + (modal.wide ? " modal--wide" : "")} role="dialog" aria-modal="true">
+          <div
+            className={"modal" + (modal.wide ? " modal--wide" : "") + (modal.extraWide ? " modal--extra-wide" : "")}
+            role="dialog"
+            aria-modal="true"
+          >
             <div className="modal-head">
               <h3>{modal.title}</h3>
               <button type="button" className="close-x" aria-label="Close" onClick={closeModal}>

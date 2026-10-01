@@ -1,19 +1,34 @@
 import { apiClient } from "./client";
 import {
+  AccountConfigCreatedResponse,
+  AccountConfigResponse,
+  ApiLogResponse,
   AriSnapshotResponse,
+  ChannelMappingResponse,
+  ChannelResponse,
+  ConnectionTokenResponse,
+  CreateAccountConfigRequest,
   CreateRatePlanRequest,
   DailyAvailabilityRow,
+  ErrorQueueResponse,
   LoginResponse,
   OnboardResponse,
+  OtaBookingAckStatus,
+  OtaBookingDetailResponse,
+  OtaBookingResponse,
+  OtaBookingRevisionResponse,
+  OtaBookingStatus,
   PropertyResponse,
   PushAvailabilityRequest,
   PushAvailabilityResponse,
   PushRestrictionsRequest,
   PushRestrictionsResponse,
+  PushTaskResponse,
   RatePlan,
   RoomTypeOnboardResult,
   RoomTypeSummary,
   UpdateRatePlanRequest,
+  WebhookLogResponse,
 } from "./types";
 
 export async function login(email: string, password: string): Promise<LoginResponse> {
@@ -101,4 +116,93 @@ export async function pushRestrictions(
     body
   );
   return response.data;
+}
+
+export async function listChannels(propertyId: number): Promise<ChannelResponse[]> {
+  const response = await apiClient.get<{ channels: ChannelResponse[] }>(`/properties/${propertyId}/channels`);
+  return response.data.channels;
+}
+
+export async function generateConnectionToken(propertyId: number, username?: string): Promise<ConnectionTokenResponse> {
+  const response = await apiClient.post<ConnectionTokenResponse>(`/properties/${propertyId}/channels/connect-token`, {
+    username,
+  });
+  return response.data;
+}
+
+export async function getChannel(channelId: string): Promise<ChannelResponse> {
+  const response = await apiClient.get<ChannelResponse>(`/channels/${channelId}`);
+  return response.data;
+}
+
+export async function activateChannel(channelId: string): Promise<ChannelResponse> {
+  const response = await apiClient.post<ChannelResponse>(`/channels/${channelId}/activate`);
+  return response.data;
+}
+
+export async function deactivateChannel(channelId: string): Promise<ChannelResponse> {
+  const response = await apiClient.post<ChannelResponse>(`/channels/${channelId}/deactivate`);
+  return response.data;
+}
+
+export async function listChannelMappings(channelId: string): Promise<ChannelMappingResponse[]> {
+  const response = await apiClient.get<{ mappings: ChannelMappingResponse[] }>(`/channels/${channelId}/mappings`);
+  return response.data.mappings;
+}
+
+export async function deleteChannelMapping(channelId: string, mappingId: string): Promise<void> {
+  await apiClient.delete(`/channels/${channelId}/mappings/${mappingId}`);
+}
+
+export async function listBookings(propertyId: number, status?: OtaBookingStatus): Promise<OtaBookingResponse[]> {
+  const response = await apiClient.get<{ bookings: OtaBookingResponse[] }>(`/properties/${propertyId}/bookings`, {
+    params: status ? { status } : undefined,
+  });
+  return response.data.bookings;
+}
+
+export async function getBooking(propertyId: number, bookingId: string): Promise<OtaBookingDetailResponse> {
+  const response = await apiClient.get<OtaBookingDetailResponse>(`/properties/${propertyId}/bookings/${bookingId}`);
+  return response.data;
+}
+
+export async function listBookingRevisions(
+  propertyId: number,
+  ackStatus?: OtaBookingAckStatus
+): Promise<OtaBookingRevisionResponse[]> {
+  const response = await apiClient.get<{ revisions: OtaBookingRevisionResponse[] }>(
+    `/properties/${propertyId}/booking-revisions`,
+    { params: ackStatus ? { ackStatus } : undefined }
+  );
+  return response.data.revisions;
+}
+
+export async function listAccountConfigs(): Promise<AccountConfigResponse[]> {
+  const response = await apiClient.get<{ accountConfigs: AccountConfigResponse[] }>("/account-config");
+  return response.data.accountConfigs;
+}
+
+export async function createAccountConfig(body: CreateAccountConfigRequest): Promise<AccountConfigCreatedResponse> {
+  const response = await apiClient.post<AccountConfigCreatedResponse>("/account-config", body);
+  return response.data;
+}
+
+export async function listPushTasks(limit = 100): Promise<PushTaskResponse[]> {
+  const response = await apiClient.get<{ tasks: PushTaskResponse[] }>("/monitoring/tasks", { params: { limit } });
+  return response.data.tasks;
+}
+
+export async function listApiLogs(limit = 100): Promise<ApiLogResponse[]> {
+  const response = await apiClient.get<{ apiLogs: ApiLogResponse[] }>("/monitoring/api-logs", { params: { limit } });
+  return response.data.apiLogs;
+}
+
+export async function listWebhookLog(limit = 100): Promise<WebhookLogResponse[]> {
+  const response = await apiClient.get<{ webhookLogs: WebhookLogResponse[] }>("/monitoring/webhook-log", { params: { limit } });
+  return response.data.webhookLogs;
+}
+
+export async function listErrorQueue(limit = 100): Promise<ErrorQueueResponse[]> {
+  const response = await apiClient.get<{ errors: ErrorQueueResponse[] }>("/monitoring/error-queue", { params: { limit } });
+  return response.data.errors;
 }

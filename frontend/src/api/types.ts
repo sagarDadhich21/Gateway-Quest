@@ -180,3 +180,131 @@ export interface PushRestrictionsResponse {
   verified: boolean;
   restrictions: RestrictionRow[];
 }
+
+export interface ChannelResponse {
+  id: string;
+  propertyId: number;
+  title: string;
+  channel: string;
+  currency: string | null;
+  isActive: boolean;
+  channex: { channelId: string };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ConnectionTokenResponse {
+  token: string;
+  iframeUrl: string;
+  expiresInMinutes: number;
+}
+
+export interface ChannelMappingResponse {
+  id: string;
+  channelId: string;
+  roomTypeId: number;
+  ratePlanId: string;
+  otaRoomCode: string;
+  otaRateCode: string;
+  channex: { mappingId: string };
+}
+
+export type OtaBookingStatus = "new" | "modified" | "cancelled";
+export type OtaBookingAckStatus = "pending" | "acked";
+
+export interface OtaBookingResponse {
+  id: string;
+  bqPropertyId: number;
+  cxBookingId: string;
+  otaName: string;
+  uniqueId: string;
+  status: OtaBookingStatus;
+  currency: string;
+  bqOrderId: string | null;
+  bqBookingId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OtaBookingRevisionResponse {
+  id: string;
+  otaBookingId: string;
+  cxRevisionId: string;
+  status: OtaBookingStatus;
+  arrivalDate: string | null;
+  departureDate: string | null;
+  amountMinorUnits: number;
+  currency: string;
+  guestName: string | null;
+  ackStatus: OtaBookingAckStatus;
+  blockingReason: string | null;
+  processingAttempts: number;
+  receivedAt: string;
+  ackedAt: string | null;
+}
+
+export interface OtaBookingDetailResponse extends OtaBookingResponse {
+  revisions: OtaBookingRevisionResponse[];
+}
+
+export interface AccountConfigResponse {
+  id: string;
+  bqPropertyId: number | null;
+  webhookUrl: string;
+  environment: string;
+  isActive: boolean;
+  sendData: boolean;
+  createdAt: string;
+}
+
+/** webhookSecret is only ever present here, on the create response - never again afterward. */
+export interface AccountConfigCreatedResponse extends AccountConfigResponse {
+  webhookSecret: string;
+}
+
+export interface CreateAccountConfigRequest {
+  webhookUrl: string;
+  apiKey: string;
+  environment: string;
+  bqPropertyId?: number;
+  sendData?: boolean;
+}
+
+export interface PushTaskResponse {
+  id: string;
+  taskType: string;
+  cxTaskId: string;
+  status: string;
+  warnings: unknown;
+  createdAt: string;
+}
+
+export interface ApiLogResponse {
+  id: string;
+  method: string;
+  endpoint: string;
+  httpStatus: number;
+  latencyMs: number;
+  requestBody: unknown;
+  responseBody: unknown;
+  createdAt: string;
+}
+
+export interface WebhookLogResponse {
+  id: string;
+  event: string;
+  ref: string;
+  attempt: number;
+  httpStatusReturned: number | null;
+  receivedAt: string;
+  nextRetryAt: string | null;
+}
+
+export interface ErrorQueueResponse {
+  id: string;
+  source: string;
+  payload: unknown;
+  errorMessage: string;
+  retryCount: number;
+  createdAt: string;
+}

@@ -1,5 +1,7 @@
 import express, { Express } from "express";
 import cors from "cors";
+import swaggerUi from "swagger-ui-express";
+import { buildOpenApiDocument } from "./docs/openapi";
 import { errorHandler } from "./middleware/errorHandler";
 import { requestId } from "./middleware/requestId";
 import { apiRouter } from "./routes";
@@ -25,6 +27,10 @@ export function createApp(): Express {
       service: "gq-backend",
     });
   });
+
+  const openApiDocument = buildOpenApiDocument();
+  app.get("/openapi.json", (_req, res) => res.status(200).json(openApiDocument));
+  app.use("/docs", swaggerUi.serve, swaggerUi.setup(openApiDocument));
 
   app.use("/api/gq", apiRouter);
 

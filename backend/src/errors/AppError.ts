@@ -17,9 +17,17 @@ export type AppErrorCode =
   | "PROPERTY_MISSING_CHANNEX_FIELDS"
   | "ROOM_TYPE_NOT_FOUND"
   | "RATE_PLAN_NOT_FOUND"
+  | "CHANNEL_NOT_FOUND"
+  | "CHANNEL_NOT_ONBOARDED"
   | "UNMAPPED_ROOM_TYPES"
   | "UNMAPPED_RATE_PLAN"
   | "OVERSELL_GUARD"
+  | "BOOKING_NOT_FOUND"
+  | "BOOKING_REVISION_NOT_FOUND"
+  | "UNMAPPED_BOOKING_PROPERTY"
+  | "UNMAPPED_BOOKING_ROOM_OR_RATE"
+  | "WEBHOOK_UNAUTHORIZED"
+  | "ADMIN_ONLY"
   | "BQ_UPSTREAM_ERROR"
   | "BQ_UPSTREAM_UNAVAILABLE"
   | "PRICING_SERVICE_UPSTREAM_ERROR"
@@ -73,6 +81,18 @@ export function ratePlanNotFoundError(): AppError {
   return new AppError("RATE_PLAN_NOT_FOUND", 404, "Rate plan not found.");
 }
 
+export function channelNotFoundError(): AppError {
+  return new AppError("CHANNEL_NOT_FOUND", 404, "Channel not found.");
+}
+
+export function propertyNotOnboardedError(): AppError {
+  return new AppError(
+    "CHANNEL_NOT_ONBOARDED",
+    422,
+    "This property must be onboarded to Channex before channels can be set up."
+  );
+}
+
 export function unmappedRoomTypesError(roomTypeNames: string[]): AppError {
   return new AppError(
     "UNMAPPED_ROOM_TYPES",
@@ -97,4 +117,38 @@ export function oversellGuardError(details: unknown): AppError {
     "Availability requested exceeds the room type's physical room count.",
     details
   );
+}
+
+export function bookingNotFoundError(): AppError {
+  return new AppError("BOOKING_NOT_FOUND", 404, "Booking not found.");
+}
+
+export function bookingRevisionNotFoundError(): AppError {
+  return new AppError("BOOKING_REVISION_NOT_FOUND", 404, "Booking revision not found.");
+}
+
+export function unmappedBookingPropertyError(cxPropertyId: string): AppError {
+  return new AppError(
+    "UNMAPPED_BOOKING_PROPERTY",
+    422,
+    "This booking's Channex property is not mapped to any onboarded BQ property.",
+    { cxPropertyId }
+  );
+}
+
+export function unmappedBookingRoomOrRateError(details: unknown): AppError {
+  return new AppError(
+    "UNMAPPED_BOOKING_ROOM_OR_RATE",
+    422,
+    "This booking's room type or rate plan is not mapped to an onboarded BQ room type / GQ rate plan.",
+    details
+  );
+}
+
+export function webhookUnauthorizedError(): AppError {
+  return new AppError("WEBHOOK_UNAUTHORIZED", 401, "Invalid or missing webhook secret.");
+}
+
+export function adminOnlyError(): AppError {
+  return new AppError("ADMIN_ONLY", 403, "This action requires the Super_Admin role.");
 }

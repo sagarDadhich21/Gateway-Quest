@@ -213,6 +213,43 @@ body {
   box-shadow: 0 0 0 3px rgba(77, 208, 225, 0.18);
 }
 
+/* Segmented toggle - e.g. API Logs' All/Warnings/Errors/Success filter. */
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.segmented__btn {
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-soft);
+  background: none;
+  border: none;
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.segmented__btn:last-child {
+  border-right: none;
+}
+
+.segmented__btn:hover {
+  background: var(--bg);
+}
+
+.segmented__btn--active {
+  background: var(--primary);
+  color: #fff;
+}
+
+.segmented__btn--active:hover {
+  background: var(--primary);
+}
+
 .form-error {
   color: #c9362c;
   font-size: 11.5px;
@@ -244,6 +281,26 @@ body {
   gap: 10px;
   padding: 20px 18px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.sidebar__toggle {
+  cursor: pointer;
+  color: #8fa0cf;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  margin-left: auto;
+  background: none;
+  border: none;
+}
+
+.sidebar__toggle:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
 }
 
 .sidebar__brand::before {
@@ -431,6 +488,7 @@ body {
   font-weight: 700;
   color: var(--primary);
   margin: 0 0 12px;
+    padding-bottom: 12px;
 }
 
 /* ---------- Mock data notice (mirrors .readonly-banner) ---------- */
@@ -568,6 +626,38 @@ body {
   background: var(--bg);
   padding: 2px 6px;
   border-radius: 4px;
+}
+
+/* Booking revision cells - status+ack stacked, and a bounded/truncated issue cell so a
+   long blocking-reason string can't stretch the whole table wide. */
+.revision-status-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.revision-issue-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-width: 280px;
+}
+
+.revision-issue-cell__reason {
+  color: #c9362c;
+  font-size: 12px;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.revision-issue-cell__attempts {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-soft);
 }
 
 .table-subtext {
@@ -1104,6 +1194,10 @@ input:focus-visible {
   width: 620px;
 }
 
+.modal--extra-wide {
+  width: min(1100px, 92vw);
+}
+
 .modal-head {
   display: flex;
   align-items: center;
@@ -1287,6 +1381,30 @@ input:focus-visible {
   }
 }
 
+/* Collapsed sidebar (manual toggle, any width) - same visual treatment as the
+   mobile breakpoint below, just triggered by .app-shell--collapsed instead of a
+   media query. Setting --sidebar-width directly on .sidebar overrides the
+   :root value for that element and everything reading it inside it. */
+.app-shell--collapsed .sidebar {
+  --sidebar-width: 60px;
+}
+.app-shell--collapsed .sidebar__brand {
+  justify-content: center;
+  padding: 16px 8px;
+}
+.app-shell--collapsed .sidebar__brand-text,
+.app-shell--collapsed .sidebar__group-title,
+.app-shell--collapsed .sidebar__link span {
+  display: none;
+}
+.app-shell--collapsed .sidebar__toggle {
+  margin-left: 0;
+}
+.app-shell--collapsed .sidebar__link {
+  justify-content: center;
+  padding: 10px;
+}
+
 @media (max-width: 768px) {
   :root {
     --sidebar-width: 60px;
@@ -1298,6 +1416,9 @@ input:focus-visible {
   .sidebar__brand-text,
   .sidebar__group-title,
   .sidebar__link span {
+    display: none;
+  }
+  .sidebar__toggle {
     display: none;
   }
   .sidebar__link {
@@ -1645,4 +1766,182 @@ input:focus-visible {
     width: 100%;
     padding: 32px 28px;
   }
+}
+
+/* ---------- Inventory calendar (mirrors Channex's own Inventory Management grid) ---------- */
+
+.inv-controls {
+  margin-bottom: 20px;
+}
+
+.inv-controls__nav {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.inv-controls__dates,
+.inv-controls__filters {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.inv-controls__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.inv-controls__field .field__input {
+  width: 160px;
+}
+
+.inv-controls__field select.field__input {
+  width: 200px;
+  cursor: pointer;
+}
+
+.inv-controls__nav-btn {
+  padding: 9px 10px;
+  line-height: 0;
+}
+
+.inv-controls__date-sep {
+  padding-bottom: 10px;
+  color: var(--text-soft);
+  font-size: 13px;
+}
+
+.inv-grid th,
+.inv-grid td {
+  text-align: center;
+  white-space: nowrap;
+}
+
+.inv-grid__pin {
+  text-align: left !important;
+  position: sticky;
+  left: 0;
+  background: #fff;
+  z-index: 1;
+  min-width: 190px;
+  box-shadow: 1px 0 0 var(--border);
+}
+
+.inv-grid thead .inv-grid__pin {
+  background: #fafbfe;
+  z-index: 2;
+}
+
+.inv-grid__room-row .inv-grid__pin {
+  background: #f4f6fb;
+}
+
+.inv-grid__room-row td:not(.inv-grid__pin) {
+  background: #f9fafd;
+}
+
+.inv-grid__sub {
+  padding-left: 30px !important;
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.inv-grid__weekend {
+  background: #f6f8fd;
+}
+
+.inv-date-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.3;
+}
+
+.inv-date-head__day {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.inv-date-head__num {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.inv-shortcode {
+  display: inline-block;
+  margin-left: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--cyan-deep);
+  background: rgba(8, 145, 168, 0.1);
+  border-radius: 4px;
+  padding: 1px 5px;
+  vertical-align: middle;
+}
+
+.inv-cell {
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.inv-cell--good {
+  color: var(--success);
+}
+
+.inv-cell--low {
+  color: var(--warning);
+}
+
+.inv-cell--none {
+  color: var(--danger);
+}
+
+.inv-cell--rate {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.inv-cell--stay {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-soft);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.inv-flags {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.inv-flag {
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  border-radius: 4px;
+  padding: 2px 5px;
+}
+
+.inv-flag--warn {
+  background: #fff3e0;
+  color: #b56a00;
+}
+
+.inv-flag--danger {
+  background: #fdeceb;
+  color: var(--danger);
 }

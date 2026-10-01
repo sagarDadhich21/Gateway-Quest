@@ -12,8 +12,8 @@ const CHANNEX_STAGING_BASE_URL = "https://staging.channex.io/api/v1";
 
 const envSchema = z
   .object({
-    NODE_ENV: z.enum(["development", "staging", "production"]).default("development"),
-    GQ_PORT: z.coerce.number().int().positive().default(4000),
+ NODE_ENV: z.enum(["development", "test", "staging", "production"]).default("development"),
+     GQ_PORT: z.coerce.number().int().positive().default(4000),
 
     DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
 

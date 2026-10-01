@@ -3,7 +3,11 @@ import { env } from "../../config/env";
 import { AppError } from "../../errors/AppError";
 import { logger } from "../../services/logger";
 import {
+  BqBookingListItem,
+  BqCancelBookingResponse,
   BqChannexMappingPatchResponse,
+  BqCreateBookingRequest,
+  BqCreateBookingResponse,
   BqDailyAvailability,
   BqLoginResponse,
   BqProperty,
@@ -287,6 +291,132 @@ export async function patchBqChannexMapping(
     const axiosErr = err as AxiosError;
     if (axiosErr.response?.status === 404) {
       throw new AppError("PROPERTY_NOT_FOUND", 404, "Property not found.");
+    }
+    throw toUpstreamError(err, "BQ", correlationId);
+  }
+}
+
+/**
+ * Lists every BQ property (GET /bq/api/properties, no filter params) - used to resolve
+ * a Channex webhook/revision's property_id (a Channex uuid) back to a BQ property by
+ * matching cx_property_id client-side, the same convention getBqRoomTypes already uses.
+ */
+export async function listBqProperties(correlationId: string): Promise<BqProperty[]> {
+  try {
+    const response = await bqHttp.get<BqProperty[]>("/bq/api/properties");
+    return response.data;
+  } catch (err) {
+    throw toUpstreamError(err, "BQ", correlationId);
+  }
+}
+
+/** POST /bq/api/create-reservation-online-new/ - the only real BQ booking-creation endpoint (used for OTA bookings via the booking_type/booking_status/fixed_amount fields added alongside this integration). */
+export async function createBqBooking(
+  payload: BqCreateBookingRequest,
+  correlationId: string
+): Promise<BqCreateBookingResponse> {
+  try {
+    const response = await bqHttp.post<BqCreateBookingResponse>(
+      "/bq/api/create-reservation-online-new/",
+      payload
+    );
+    return response.data;
+  } catch (err) {
+    const axiosErr = err as AxiosError<{ detail?: unknown }>;
+    if (axiosErr.response?.status && axiosErr.response.status < 500) {
+      throw new AppError(
+        "BQ_UPSTREAM_ERROR",
+        axiosErr.response.status,
+        `BQ rejected the booking: ${JSON.stringify(axiosErr.response.data?.detail ?? axiosErr.message)}`
+      );
+    }
+    throw toUpstreamError(err, "BQ", correlationId);
+  }
+}
+
+/**
+ * GET /bq/api/bookings/ has no filter params - fetches every booking and finds the one
+ * matching bookingId client-side, used to verify a just-created booking actually
+ * exists in BQ (per this phase's explicit "verify the booking through BQ API" step).
+ */
+export async function findBqBookingById(
+  bookingId: string,
+  correlationId: string
+): Promise<BqBookingListItem | null> {
+  try {
+    const response = await bqHttp.get<{ bookings: BqBookingListItem[] }>("/bq/api/bookings/");
+    return response.data.bookings.find((b) => b.bookingid === bookingId) ?? null;
+  } catch (err) {
+    throw toUpstreamError(err, "BQ", correlationId);
+  }
+}
+
+/** POST /bq/api/cancel-booking/?orderid=... - cancels every (non-checked-in) booking row under that order id. */
+export async function cancelBqBooking(
+  orderId: string,
+  cancellationReason: string,
+  correlationId: string
+): Promise<BqCancelBookingResponse> {
+  try {
+    const response = await bqHttp.post<BqCancelBookingResponse>(
+      "/bq/api/cancel-booking/",
+      { cancellation_reason: cancellationReason },
+      { params: { orderid: orderId } }
+    );
+    return response.data;
+  } catch (err) {
+    const axiosErr = err as AxiosError<{ detail?: unknown }>;
+    if (axiosErr.response?.status === 404) {
+      throw new AppError("BOOKING_NOT_FOUND", 404, "Booking not found in BQ for this order id.");
+    }
+    if (axiosErr.response?.status && axiosErr.response.status < 500) {
+      throw new AppError(
+        "BQ_UPSTREAM_ERROR",
+        axiosErr.response.status,
+        `BQ rejected the cancellation: ${JSON.stringify(axiosErr.response.data?.detail ?? axiosErr.message)}`
+      );
+    }
+    throw toUpstreamError(err, "BQ", correlationId);
+  }
+}
+
+/**
+ * POST /bq/api/modify-booking/ - updates dates and/or room type only (BQ's own query
+ * params, confirmed from bookingchange.py). BQ recalculates pricing internally on
+ * modification same as creation - there is no equivalent fixed_amount override for
+ * this endpoint, so a modified OTA booking's amount in BQ may not match Channex's
+ * revised amount. Flagged as a known limitation, not silently papered over.
+ */
+export async function modifyBqBooking(
+  bookingId: string,
+  changes: { newRoomTypeName?: string; newCheckinDate?: string; newCheckoutDate?: string },
+  correlationId: string
+): Promise<unknown> {
+  try {
+    const response = await bqHttp.post(
+      "/bq/api/modify-booking/",
+      {},
+      {
+        params: {
+          booking_id: bookingId,
+          new_room_type_name: changes.newRoomTypeName,
+          new_checkin_date: changes.newCheckinDate,
+          new_checkout_date: changes.newCheckoutDate,
+        },
+      }
+    );
+    return response.data;
+  } catch (err) {
+    const axiosErr = err as AxiosError<{ detail?: unknown }>;
+    if (axiosErr.response?.status === 404) {
+      throw new AppError("BOOKING_NOT_FOUND", 404, "Booking not found in BQ.");
+    }
+    if (axiosErr.response?.status && axiosErr.response.status < 500) {
+      throw new AppError(
+        "BQ_UPSTREAM_ERROR",
+        axiosErr.response.status,
+        `BQ rejected the modification: ${JSON.stringify(axiosErr.response.data?.detail ?? axiosErr.message)}`
+      );
     }
     throw toUpstreamError(err, "BQ", correlationId);
   }

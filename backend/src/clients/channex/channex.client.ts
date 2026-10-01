@@ -1,4 +1,4 @@
-import axios, { AxiosError, AxiosInstance } from "axios";
+import axios, { AxiosError, AxiosInstance, InternalAxiosRequestConfig } from "axios";
 import { env } from "../../config/env";
 import { AppError } from "../../errors/AppError";
 import { logApiCall } from "../../repositories/gqApiLog.repository";
@@ -7,6 +7,13 @@ import {
   ChannexAriPushResponse,
   ChannexAvailabilityPushRequest,
   ChannexAvailabilityReadResponse,
+  ChannexBookingDetailResponse,
+  ChannexBookingRevisionFeedResponse,
+  ChannexChannelActionResponse,
+  ChannexChannelDetailResponse,
+  ChannexChannelListResponse,
+  ChannexOneTimeTokenRequest,
+  ChannexOneTimeTokenResponse,
   ChannexPropertyCreateRequest,
   ChannexPropertyCreateResponse,
   ChannexRatePlanCreateRequest,
@@ -24,6 +31,8 @@ const PUSH_AVAILABILITY_ENDPOINT = "/availability";
 const PUSH_RESTRICTIONS_ENDPOINT = "/restrictions";
 const READ_AVAILABILITY_ENDPOINT = "/availability";
 const READ_RESTRICTIONS_ENDPOINT = "/restrictions";
+const CHANNELS_ENDPOINT = "/channels";
+const ONE_TIME_TOKEN_ENDPOINT = "/auth/one_time_token";
 
 const channexHttp: AxiosInstance = axios.create({
   baseURL: env.CHANNEX_BASE_URL,
@@ -34,7 +43,85 @@ const channexHttp: AxiosInstance = axios.create({
     "Content-Type": "application/json",
   },
 });
- 
+
+declare module "axios" {
+  export interface InternalAxiosRequestConfig {
+    _gqStartedAt?: number;
+  }
+}
+
+const SENSITIVE_KEYS = new Set([
+  "api_key",
+  "user-api-key",
+  "apikey",
+  "password",
+  "secret",
+  "token",
+  "cvv",
+  "card_number",
+  "authorization",
+]);
+
+/**
+ * Recursively masks known sensitive field names before anything is persisted to
+ * gq_api_log - defense in depth on top of Channex's own partial card masking (e.g.
+ * "524181******0000"), never a substitute for it.
+ */
+export function redact(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(redact);
+  }
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+      out[key] = SENSITIVE_KEYS.has(key.toLowerCase()) ? "[redacted]" : redact(val);
+    }
+    return out;
+  }
+  return value;
+}
+
+/**
+ * Every request/response GQ exchanges with Channex, logged once here rather than
+ * repeated at each of the ~20 call sites below (which used to each track their own
+ * startedAt/httpStatus purely to call this manually, on both the success and error
+ * path - removed in favor of these two interceptors). Captures query params and body
+ * together as the "request", redacted the same way as the response.
+ */
+channexHttp.interceptors.request.use((config) => {
+  config._gqStartedAt = Date.now();
+  return config;
+});
+
+async function logChannexCall(config: InternalAxiosRequestConfig, httpStatus: number, responseBody: unknown): Promise<void> {
+  const startedAt = config._gqStartedAt ?? Date.now();
+  try {
+    await logApiCall({
+      method: (config.method ?? "get").toUpperCase(),
+      endpoint: config.url ?? "",
+      httpStatus,
+      latencyMs: Date.now() - startedAt,
+      requestBody: redact({ params: config.params, body: config.data }),
+      responseBody: redact(responseBody),
+    });
+  } catch (err) {
+    logger.error("api_log_write_failed", { message: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+channexHttp.interceptors.response.use(
+  (response) => {
+    void logChannexCall(response.config, response.status, response.data);
+    return response;
+  },
+  (error: AxiosError) => {
+    if (error.config) {
+      void logChannexCall(error.config, error.response?.status ?? 0, error.response?.data);
+    }
+    return Promise.reject(error);
+  }
+);
+
 /**
  * Maps a Channex API failure to a safe AppError. Never includes the API key or raw
  * upstream body in what gets logged or returned - only status code and Channex's own
@@ -78,35 +165,16 @@ export async function createChannexProperty(
   payload: ChannexPropertyCreateRequest,
   correlationId: string
 ): Promise<ChannexPropertyCreateResponse> {
-  const startedAt = Date.now();
-  let httpStatus = 0;
- 
   let response;
   try {
     response = await channexHttp.post<ChannexPropertyCreateResponse>(
       CREATE_PROPERTY_ENDPOINT,
       payload
     );
-    httpStatus = response.status;
   } catch (err) {
-    const axiosErr = err as AxiosError;
-    httpStatus = axiosErr.response?.status ?? 0;
-    await logApiCall({
-      method: "POST",
-      endpoint: CREATE_PROPERTY_ENDPOINT,
-      httpStatus,
-      latencyMs: Date.now() - startedAt,
-    });
     throw toChannexError(err, correlationId);
   }
- 
-  await logApiCall({
-    method: "POST",
-    endpoint: CREATE_PROPERTY_ENDPOINT,
-    httpStatus,
-    latencyMs: Date.now() - startedAt,
-  });
- 
+
   const body = response.data;
  
   // Channex may return one created resource as an object or as a one-item array.
@@ -146,34 +214,15 @@ export async function createChannexRoomType(
   payload: ChannexRoomTypeCreateRequest,
   correlationId: string
 ): Promise<ChannexRoomTypeCreateResponse> {
-  const startedAt = Date.now();
-  let httpStatus = 0;
-
   let response;
   try {
     response = await channexHttp.post<ChannexRoomTypeCreateResponse>(
       CREATE_ROOM_TYPE_ENDPOINT,
       payload
     );
-    httpStatus = response.status;
   } catch (err) {
-    const axiosErr = err as AxiosError;
-    httpStatus = axiosErr.response?.status ?? 0;
-    await logApiCall({
-      method: "POST",
-      endpoint: CREATE_ROOM_TYPE_ENDPOINT,
-      httpStatus,
-      latencyMs: Date.now() - startedAt,
-    });
     throw toChannexError(err, correlationId);
   }
-
-  await logApiCall({
-    method: "POST",
-    endpoint: CREATE_ROOM_TYPE_ENDPOINT,
-    httpStatus,
-    latencyMs: Date.now() - startedAt,
-  });
 
   const body = response.data;
 
@@ -214,34 +263,15 @@ export async function createChannexRatePlan(
   payload: ChannexRatePlanCreateRequest,
   correlationId: string
 ): Promise<ChannexRatePlanCreateResponse> {
-  const startedAt = Date.now();
-  let httpStatus = 0;
-
   let response;
   try {
     response = await channexHttp.post<ChannexRatePlanCreateResponse>(
       CREATE_RATE_PLAN_ENDPOINT,
       payload
     );
-    httpStatus = response.status;
   } catch (err) {
-    const axiosErr = err as AxiosError;
-    httpStatus = axiosErr.response?.status ?? 0;
-    await logApiCall({
-      method: "POST",
-      endpoint: CREATE_RATE_PLAN_ENDPOINT,
-      httpStatus,
-      latencyMs: Date.now() - startedAt,
-    });
     throw toChannexError(err, correlationId);
   }
-
-  await logApiCall({
-    method: "POST",
-    endpoint: CREATE_RATE_PLAN_ENDPOINT,
-    httpStatus,
-    latencyMs: Date.now() - startedAt,
-  });
 
   const body = response.data;
 
@@ -290,31 +320,12 @@ async function postAriPush(
   correlationId: string,
   resourceLabel: string
 ): Promise<ChannexAriPushResponse> {
-  const startedAt = Date.now();
-  let httpStatus = 0;
-
   let response;
   try {
     response = await channexHttp.post<ChannexAriPushResponse>(endpoint, payload);
-    httpStatus = response.status;
   } catch (err) {
-    const axiosErr = err as AxiosError;
-    httpStatus = axiosErr.response?.status ?? 0;
-    await logApiCall({
-      method: "POST",
-      endpoint,
-      httpStatus,
-      latencyMs: Date.now() - startedAt,
-    });
     throw toChannexError(err, correlationId);
   }
-
-  await logApiCall({
-    method: "POST",
-    endpoint,
-    httpStatus,
-    latencyMs: Date.now() - startedAt,
-  });
 
   const body = response.data;
 
@@ -415,6 +426,173 @@ export async function getChannexRestrictions(
       },
     });
     return response.data;
+  } catch (err) {
+    throw toChannexError(err, correlationId);
+  }
+}
+
+/** Lists a property's connected channels (GET /channels?filter[property_id]=...). */
+export async function listChannexChannels(
+  cxPropertyId: string,
+  correlationId: string
+): Promise<ChannexChannelListResponse> {
+  try {
+    const response = await channexHttp.get<ChannexChannelListResponse>(CHANNELS_ENDPOINT, {
+      params: { "filter[property_id]": cxPropertyId },
+    });
+    return response.data;
+  } catch (err) {
+    throw toChannexError(err, correlationId);
+  }
+}
+
+/** One channel's details, including known_mappings - the only way to read room/rate mappings a property owner set up in Channex's own mapping screen. */
+export async function getChannexChannel(
+  cxChannelId: string,
+  correlationId: string
+): Promise<ChannexChannelDetailResponse> {
+  const endpoint = `${CHANNELS_ENDPOINT}/${cxChannelId}`;
+  try {
+    const response = await channexHttp.get<ChannexChannelDetailResponse>(endpoint);
+    return response.data;
+  } catch (err) {
+    const axiosErr = err as AxiosError;
+    if (axiosErr.response?.status === 404) {
+      throw new AppError(
+        "CHANNEL_NOT_FOUND",
+        404,
+        "This channel no longer exists on Channex - it was likely removed there directly, outside of GQ."
+      );
+    }
+    throw toChannexError(err, correlationId);
+  }
+}
+
+/**
+ * Confirmed live against Channex staging: this endpoint returns only
+ * `{"meta":{"message":"Success"}}` on success, never the updated channel resource
+ * (despite what the docs summary implied) - callers get a confirmation, not a body to
+ * read `is_active`/etc. from.
+ */
+async function setChannexChannelActive(
+  cxChannelId: string,
+  active: boolean,
+  correlationId: string
+): Promise<ChannexChannelActionResponse> {
+  const endpoint = `${CHANNELS_ENDPOINT}/${cxChannelId}/${active ? "activate" : "deactivate"}`;
+  try {
+    const response = await channexHttp.post<ChannexChannelActionResponse>(endpoint);
+    return response.data;
+  } catch (err) {
+    const axiosErr = err as AxiosError;
+    if (axiosErr.response?.status === 404) {
+      throw new AppError(
+        "CHANNEL_NOT_FOUND",
+        404,
+        "This channel no longer exists on Channex - it was likely removed there directly, outside of GQ."
+      );
+    }
+    throw toChannexError(err, correlationId);
+  }
+}
+
+/** POST /channels/{id}/activate. */
+export async function activateChannexChannel(cxChannelId: string, correlationId: string): Promise<ChannexChannelActionResponse> {
+  return setChannexChannelActive(cxChannelId, true, correlationId);
+}
+
+/** POST /channels/{id}/deactivate. */
+export async function deactivateChannexChannel(cxChannelId: string, correlationId: string): Promise<ChannexChannelActionResponse> {
+  return setChannexChannelActive(cxChannelId, false, correlationId);
+}
+
+/**
+ * POST /auth/one_time_token - the only Channex-issued credential for launching the
+ * hosted IFrame "mapping screen" (docs.channex.io/api-v.1-documentation/
+ * channel-iframe). Valid for 15 minutes and single-use; Channex has no other API for
+ * configuring room/rate mappings, so this is how GQ hands the property owner off to
+ * Channex's own UI to do it.
+ */
+export async function createChannexOneTimeToken(
+  payload: ChannexOneTimeTokenRequest,
+  correlationId: string
+): Promise<ChannexOneTimeTokenResponse> {
+  try {
+    const response = await channexHttp.post<ChannexOneTimeTokenResponse>(ONE_TIME_TOKEN_ENDPOINT, payload);
+    return response.data;
+  } catch (err) {
+    throw toChannexError(err, correlationId);
+  }
+}
+
+const REVISION_FEED_ENDPOINT = "/booking_revisions/feed";
+const BOOKINGS_ENDPOINT = "/bookings";
+
+/**
+ * GET /booking_revisions/feed - the fallback/recovery read for missed webhooks
+ * (docs.channex.io/api-v.1-documentation/bookings-collection). Paginated; callers loop
+ * pages themselves (see scripts/run-revision-feed.ts).
+ */
+export async function getChannexRevisionFeed(
+  cxPropertyId: string | undefined,
+  page: number,
+  limit: number,
+  correlationId: string
+): Promise<ChannexBookingRevisionFeedResponse> {
+  try {
+    const response = await channexHttp.get<ChannexBookingRevisionFeedResponse>(REVISION_FEED_ENDPOINT, {
+      params: {
+        "filter[property_id]": cxPropertyId,
+        "pagination[page]": page,
+        "pagination[limit]": limit,
+        "order[inserted_at]": "asc",
+      },
+    });
+    return response.data;
+  } catch (err) {
+    throw toChannexError(err, correlationId);
+  }
+}
+
+/** GET /bookings/:id - full reservation detail for one Channex booking id (webhook payloads only carry the id, not the content). */
+/**
+ * GET /bookings/:id's `attributes.id` is the BOOKING's id, not the revision's - the
+ * real revision id is the separate `attributes.revision_id` field (confirmed live
+ * 2026-10-01, see the doc comment on ChannexBookingRevisionAttributes). Normalized
+ * here, once, so every caller of getChannexBooking() can keep treating `.id` as "the
+ * revision id" exactly like a revision-feed entry, without needing to know which
+ * endpoint it came from.
+ */
+export function normalizeBookingDetailResponse(body: ChannexBookingDetailResponse): ChannexBookingDetailResponse {
+  const attrs = body.data.attributes;
+  if (!attrs.revision_id || attrs.revision_id === attrs.id) {
+    return body;
+  }
+  return { ...body, data: { ...body.data, attributes: { ...attrs, id: attrs.revision_id } } };
+}
+
+export async function getChannexBooking(
+  cxBookingId: string,
+  correlationId: string
+): Promise<ChannexBookingDetailResponse> {
+  const endpoint = `${BOOKINGS_ENDPOINT}/${cxBookingId}`;
+  try {
+    const response = await channexHttp.get<ChannexBookingDetailResponse>(endpoint);
+    return normalizeBookingDetailResponse(response.data);
+  } catch (err) {
+    const axiosErr = err as AxiosError;
+    if (axiosErr.response?.status === 404) {
+      throw new AppError("BOOKING_NOT_FOUND", 404, "Booking not found on Channex.");
+    }
+    throw toChannexError(err, correlationId);
+  }
+}
+
+/** POST /booking_revisions/{id}/ack - marks a revision processed; per Channex's docs this removes it from the feed, not confirmed to affect webhook redelivery. */
+export async function ackChannexRevision(cxRevisionId: string, correlationId: string): Promise<void> {
+  const endpoint = `${REVISION_FEED_ENDPOINT.replace("/feed", "")}/${cxRevisionId}/ack`;
+  try {
+    await channexHttp.post(endpoint);
   } catch (err) {
     throw toChannexError(err, correlationId);
   }

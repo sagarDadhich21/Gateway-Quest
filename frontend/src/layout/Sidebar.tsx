@@ -2,14 +2,27 @@ import { NavLink } from "react-router-dom";
 import { Icon } from "../components/Icon";
 import { NAV_GROUPS } from "./navConfig";
 
-export function Sidebar() {
+interface SidebarProps {
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
+}
+
+export function Sidebar({ collapsed, onToggleCollapsed }: SidebarProps) {
   return (
     <nav className="sidebar" aria-label="Primary">
       <div className="sidebar__brand">
         <div className="sidebar__brand-text">
           <span className="t1">Gateway Quest</span>
-          <span className="t2">CHANNEX DISTRIBUTION</span>
         </div>
+        <button
+          type="button"
+          className="sidebar__toggle"
+          onClick={onToggleCollapsed}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-expanded={!collapsed}
+        >
+          <Icon name={collapsed ? "chevron-right" : "chevron-left"} size="sm" />
+        </button>
       </div>
       <div className="sidebar__scroll">
         {NAV_GROUPS.map((group, index) => (

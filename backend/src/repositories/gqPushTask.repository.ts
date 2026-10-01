@@ -1,3 +1,4 @@
+import { gq_push_task } from "@prisma/client";
 import { prisma } from "./prismaClient";
 
 export interface CreatePushTaskInput {
@@ -38,4 +39,8 @@ export async function updatePushTaskStatus(
     where: { cx_task_id: cxTaskId },
     data: { status },
   });
+}
+
+export async function listPushTasks(limit: number): Promise<gq_push_task[]> {
+  return prisma.gq_push_task.findMany({ orderBy: { created_at: "desc" }, take: limit });
 }

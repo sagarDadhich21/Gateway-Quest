@@ -19,6 +19,7 @@ import { RatePlanMapping } from "./pages/mapping/RatePlanMapping";
 import { AvailabilityPush } from "./pages/distribution/AvailabilityPush";
 import { RatesPush } from "./pages/distribution/RatesPush";
 import { Restrictions } from "./pages/distribution/Restrictions";
+import { Bookings } from "./pages/bookings/Bookings";
 import { BookingRevisions } from "./pages/bookings/BookingRevisions";
 import { ChannexTasks } from "./pages/monitoring/ChannexTasks";
 import { ApiLogs } from "./pages/monitoring/ApiLogs";
@@ -58,6 +59,7 @@ export function App() {
         <Route path="/distribution/rates" element={<RatesPush />} />
         <Route path="/distribution/restrictions" element={<Restrictions />} />
 
+        <Route path="/bookings" element={<Bookings />} />
         <Route path="/bookings/revisions" element={<BookingRevisions />} />
 
         <Route path="/monitoring/tasks" element={<ChannexTasks />} />
