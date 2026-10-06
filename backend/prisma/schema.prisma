@@ -40,7 +40,7 @@ model gq_account_config {
   webhook_secret String
   api_key        String
   environment    String
-  cx_webhook_id  String?  @unique
+  cx_webhook_id  String?
   is_active      Boolean  @default(true)
   send_data      Boolean  @default(false)
   created_at     DateTime @default(now())

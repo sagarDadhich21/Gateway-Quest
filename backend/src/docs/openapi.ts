@@ -1,6 +1,10 @@
 import { extendZodWithOpenApi, OpenAPIRegistry, OpenApiGeneratorV3 } from "@asteasolutions/zod-to-openapi";
 import { z } from "zod";
-import { createAccountConfigSchema } from "../modules/accountConfig/accountConfig.schema";
+import {
+  accountConfigIdParamSchema,
+  createAccountConfigSchema,
+  setAccountConfigActiveSchema,
+} from "../modules/accountConfig/accountConfig.schema";
 import { loginRequestSchema } from "../modules/auth/auth.schema";
 import {
   bookingIdParamSchema,
@@ -749,6 +753,7 @@ const accountConfigResponseSchema = registry.register(
     environment: z.string(),
     isActive: z.boolean(),
     sendData: z.boolean(),
+    cxWebhookId: z.string().nullable().openapi({ description: "Set once POST /account-config/{id}/register-with-channex has actually registered this with Channex - null until then." }),
     createdAt: z.string().datetime(),
   })
 );
@@ -759,6 +764,20 @@ const accountConfigCreatedResponseSchema = registry.register(
     webhookSecret: z.string().openapi({
       description: "Only ever returned here, at creation time - use it as the `headers` value when registering the webhook with Channex, and as this endpoint's own x-channex-webhook-secret. Not retrievable again afterward.",
     }),
+    existingActiveConfigsForUrl: z.number().int().nonnegative().openapi({
+      description:
+        "Count of other active configs that already use this exact webhookUrl, at creation time. Channex allows only one webhook per (callback_url, event_mask) pair, so a value > 0 means registering this new config with Channex will just adopt the same webhook the others already use - consider reusing an existing config or deactivating the older ones instead of creating more.",
+    }),
+  })
+);
+
+const registerAccountConfigResponseSchema = registry.register(
+  "RegisterAccountConfigResponse",
+  accountConfigResponseSchema.extend({
+    sharedWithOtherActiveConfigs: z.number().int().nonnegative().openapi({
+      description:
+        "Channex allows only one webhook per (callback_url, event_mask) pair, so when several gq_account_config rows share a URL, registering any of them adopts the same Channex webhook - and since Channex only stores one secret per webhook, the most recently registered row's secret is the only one actually live. A value > 0 means this config's own secret may already be stale; consider deactivating the duplicates.",
+    }),
   })
 );
 
@@ -768,7 +787,7 @@ registry.registerPath({
   tags: ["Account config"],
   summary: "Create a Channex account/webhook config (admin only)",
   description:
-    "Generates a random webhook_secret server-side and persists it as an active gq_account_config row - this is what POST /webhooks/channex checks incoming requests against. Requires the caller's GQ token to carry BQ's 'Super_Admin' role.",
+    "Generates a random webhook_secret server-side and persists it as an active gq_account_config row - this is what POST /webhooks/channex checks incoming requests against. Requires the caller's GQ token to carry BQ's 'Super_Admin' role. Always succeeds even if another active config already uses the same webhookUrl - see existingActiveConfigsForUrl on the response for a non-blocking warning about that.",
   security: AUTH,
   request: { body: { content: { "application/json": { schema: createAccountConfigSchema } } } },
   responses: {
@@ -788,6 +807,42 @@ registry.registerPath({
   responses: {
     200: { description: "Account configs", content: { "application/json": { schema: z.object({ accountConfigs: z.array(accountConfigResponseSchema) }) } } },
     403: errorResponse("Caller's token does not carry the Super_Admin role"),
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/account-config/{accountConfigId}/register-with-channex",
+  tags: ["Account config"],
+  summary: "Register this config's webhook with Channex (admin only)",
+  description:
+    "The real Channex-side registration (POST {CHANNEX_BASE_URL}/webhooks) this whole feature exists to automate - previously a manual curl/Postman call pasting the one-time secret from POST /account-config into Channex by hand. Safe to call again (e.g. after editing the URL): if already registered, updates the existing Channex webhook in place (PUT) rather than creating a second one - Channex allows only one webhook per (callback_url, event_mask) pair, so a first-time registration that collides with one Channex already has for this URL is detected and adopted the same way instead of failing.",
+  security: AUTH,
+  request: { params: accountConfigIdParamSchema },
+  responses: {
+    200: { description: "Registered - cxWebhookId now set", content: { "application/json": { schema: registerAccountConfigResponseSchema } } },
+    403: errorResponse("Caller's token does not carry the Super_Admin role"),
+    404: errorResponse("Account config not found"),
+  },
+});
+
+registry.registerPath({
+  method: "patch",
+  path: "/account-config/{accountConfigId}/active",
+  tags: ["Account config"],
+  summary: "Activate or deactivate a config (admin only)",
+  description:
+    "Toggles whether this config's webhook_secret is checked against inbound Channex calls (findActiveWebhookSecrets). Deliberately local to GQ only - does not touch the Channex-side webhook, which other active configs sharing the same cxWebhookId may still depend on. Use this to clean up duplicate configs left over from re-registering the same URL (see sharedWithOtherActiveConfigs on the register response).",
+  security: AUTH,
+  request: {
+    params: accountConfigIdParamSchema,
+    body: { content: { "application/json": { schema: setAccountConfigActiveSchema } } },
+  },
+  responses: {
+    200: { description: "Updated", content: { "application/json": { schema: accountConfigResponseSchema } } },
+    403: errorResponse("Caller's token does not carry the Super_Admin role"),
+    404: errorResponse("Account config not found"),
+    422: errorResponse("Request validation failed"),
   },
 });
 

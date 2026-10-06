@@ -13,6 +13,7 @@ import {
   ErrorQueueResponse,
   LoginResponse,
   OnboardResponse,
+  RegisterAccountConfigResponse,
   OtaBookingAckStatus,
   OtaBookingDetailResponse,
   OtaBookingResponse,
@@ -184,6 +185,16 @@ export async function listAccountConfigs(): Promise<AccountConfigResponse[]> {
 
 export async function createAccountConfig(body: CreateAccountConfigRequest): Promise<AccountConfigCreatedResponse> {
   const response = await apiClient.post<AccountConfigCreatedResponse>("/account-config", body);
+  return response.data;
+}
+
+export async function registerAccountConfigWithChannex(id: string): Promise<RegisterAccountConfigResponse> {
+  const response = await apiClient.post<RegisterAccountConfigResponse>(`/account-config/${id}/register-with-channex`);
+  return response.data;
+}
+
+export async function setAccountConfigActive(id: string, isActive: boolean): Promise<AccountConfigResponse> {
+  const response = await apiClient.patch<AccountConfigResponse>(`/account-config/${id}/active`, { isActive });
   return response.data;
 }
 

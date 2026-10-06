@@ -330,6 +330,56 @@ export interface ChannexOneTimeTokenResponse {
 }
 
 /**
+ * POST /webhooks - registers a callback URL Channex will call for booking events
+ * (docs.channex.io/api-v.1-documentation/webhook-collection). `headers` is where the
+ * shared-secret header goes (Channex documents no cryptographic signature scheme, this
+ * is the real, complete verification mechanism - see WEBHOOK_SECRET_HEADER in
+ * booking.routes.ts). `property_id`/`is_global` are mutually exclusive in intent: a
+ * specific property, or every property on the account.
+ */
+export interface ChannexWebhookCreateRequest {
+  webhook: {
+    callback_url: string;
+    event_mask: string;
+    property_id?: string | null;
+    is_global?: boolean;
+    headers?: Record<string, string>;
+    is_active?: boolean;
+    send_data?: boolean;
+  };
+}
+
+export interface ChannexWebhookCreateResponse {
+  data: { id: string; type: "webhook"; attributes?: Record<string, unknown> };
+}
+
+/** PUT /webhooks/{id} - same request/response shape as create, used to update an existing registration in place. */
+export type ChannexWebhookUpdateRequest = ChannexWebhookCreateRequest;
+export type ChannexWebhookUpdateResponse = ChannexWebhookCreateResponse;
+
+/**
+ * GET /webhooks - Channex enforces at most one webhook per (callback_url, event_mask)
+ * pair account-wide (confirmed via a real `422 validation_error` - "only one webhook for
+ * callback url and event mask allowed" - when re-registering a URL that already has one,
+ * e.g. from an earlier manual curl registration or a second gq_account_config row sharing
+ * the same URL). This list is how registerAccountConfigWithChannex() finds and adopts
+ * that existing registration instead of failing.
+ */
+export interface ChannexWebhookListResponse {
+  data: Array<{
+    id: string;
+    type: "webhook";
+    attributes: {
+      callback_url: string;
+      event_mask: string;
+      property_id?: string | null;
+      is_global?: boolean;
+      [key: string]: unknown;
+    };
+  }>;
+}
+
+/**
  * Types for Channex's Booking Revision Feed and single-booking read (docs.channex.io/
  * api-v.1-documentation/bookings-collection). A webhook payload only ever carries
  * {event, payload:{booking_id, property_id, revision_id}} - the actual reservation

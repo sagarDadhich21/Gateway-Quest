@@ -628,6 +628,24 @@ body {
   border-radius: 4px;
 }
 
+/* ---------- Table pagination ---------- */
+
+.table-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 20px;
+  border-top: 1px solid var(--border);
+}
+
+.table-pagination__controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 /* Booking revision cells - status+ack stacked, and a bounded/truncated issue cell so a
    long blocking-reason string can't stretch the whole table wide. */
 .revision-status-cell {

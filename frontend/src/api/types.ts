@@ -254,12 +254,31 @@ export interface AccountConfigResponse {
   environment: string;
   isActive: boolean;
   sendData: boolean;
+  /** Set once register-with-channex has actually registered this with Channex - null until then. */
+  cxWebhookId: string | null;
   createdAt: string;
 }
 
-/** webhookSecret is only ever present here, on the create response - never again afterward. */
+/**
+ * webhookSecret is only ever present here, on the create response - never again afterward.
+ * existingActiveConfigsForUrl > 0 means another active config already uses this exact
+ * webhookUrl - Channex allows only one webhook per (callback_url, event_mask) pair, so
+ * registering this new config will just adopt that same webhook (see
+ * RegisterAccountConfigResponse.sharedWithOtherActiveConfigs).
+ */
 export interface AccountConfigCreatedResponse extends AccountConfigResponse {
   webhookSecret: string;
+  existingActiveConfigsForUrl: number;
+}
+
+/**
+ * sharedWithOtherActiveConfigs > 0 means another active config already uses this same
+ * Channex webhook (Channex allows only one per callback_url+event_mask) - since Channex
+ * only stores one secret per webhook, only the most recently registered config's secret
+ * is actually live, so the others should be deactivated.
+ */
+export interface RegisterAccountConfigResponse extends AccountConfigResponse {
+  sharedWithOtherActiveConfigs: number;
 }
 
 export interface CreateAccountConfigRequest {

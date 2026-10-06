@@ -34,18 +34,19 @@ duplicated between the live and recovery paths.
    The secret itself is generated server-side (random, not caller-supplied),
    so it can't accidentally be weak or guessable.
 
-2. **Register the webhook with Channex**, `POST {CHANNEX_BASE_URL}/webhooks`:
-   ```json
-   {
-     "webhook": {
-       "callback_url": "https://<your-public-host>/api/gq/webhooks/channex",
-       "event_mask": "*",
-       "is_active": true,
-       "send_data": true,
-       "headers": { "x-channex-webhook-secret": "<webhookSecret from step 1>" }
-     }
-   }
-   ```
+2. **Register the webhook with Channex** - one click, no manual curl needed:
+   `POST /api/gq/account-config/:accountConfigId/register-with-channex`
+   (same `Super_Admin` token, no body). GQ calls Channex's real
+   `POST {CHANNEX_BASE_URL}/webhooks` for you, with the stored secret already
+   attached under the `x-channex-webhook-secret` header, and persists the
+   returned webhook id as `cx_webhook_id`. In the frontend, this is the
+   **"Register with Channex"** button on the webhook-secret popup shown right
+   after creating a config (Connection page), or the per-row **Register**
+   action for a config created earlier. Safe to call again (e.g. after
+   editing the URL) - Channex has no update endpoint, so this always creates
+   a new registration and overwrites `cx_webhook_id` with the latest one; the
+   old registration is left on Channex's side.
+
    Channex has **no cryptographic signature scheme** for webhooks (confirmed
    directly from their own docs) - this shared-secret header comparison is
    the complete, real verification available, not a limitation of this
@@ -64,6 +65,25 @@ duplicated between the live and recovery paths.
   server-side (random, 32 bytes hex), returned once in the response.
 - `GET /api/gq/account-config` - list configs; `webhookSecret` is always
   redacted here.
+- `POST /api/gq/account-config/:accountConfigId/register-with-channex` -
+  registers the config's `callback_url`/secret with Channex for real
+  (`404 ACCOUNT_CONFIG_NOT_FOUND` if the id doesn't exist); resolves the real
+  Channex property id via BQ when the config is property-scoped, otherwise
+  registers as a global (`is_global: true`) webhook; stores the returned
+  webhook id as `cxWebhookId` in the response. Channex allows only **one**
+  webhook per `(callback_url, event_mask)` pair, so if another config already
+  registered this same URL, this adopts that existing webhook instead of
+  failing - the response's `sharedWithOtherActiveConfigs` then tells you how
+  many other active configs share it. Since Channex only keeps one secret per
+  webhook, only the most recently registered config's secret is actually
+  live; deactivate the others (see below).
+- `PATCH /api/gq/account-config/:accountConfigId/active` - body
+  `{"isActive": boolean}`. Toggles whether this config's `webhook_secret` is
+  checked against inbound Channex calls (`findActiveWebhookSecrets`).
+  Deliberately local to GQ only - does **not** touch the Channex-side
+  webhook, which other active configs sharing the same `cxWebhookId` may
+  still depend on. Use this to clean up the duplicate configs left over from
+  re-registering the same URL multiple times.
 
 Both require the caller's GQ session token to carry BQ's `Super_Admin` role
 (`requireAdmin` middleware) - `403 ADMIN_ONLY` otherwise. `roles` is passed

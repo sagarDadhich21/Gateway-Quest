@@ -1,4 +1,6 @@
 import { ReactNode } from "react";
+import { TablePagination } from "./TablePagination";
+import { usePagination } from "./usePagination";
 
 export interface DataTableColumn<T> {
   key: string;
@@ -12,6 +14,8 @@ interface DataTableProps<T> {
   rows: T[];
   getRowKey: (row: T) => string;
   emptyMessage?: string;
+  /** Rows per page - pagination is hidden entirely when rows.length <= pageSize. */
+  pageSize?: number;
 }
 
 export function DataTable<T>({
@@ -19,7 +23,11 @@ export function DataTable<T>({
   rows,
   getRowKey,
   emptyMessage = "No records.",
+  pageSize = 20,
 }: DataTableProps<T>) {
+  const { page, totalPages, start, end, setPage } = usePagination(rows.length, pageSize);
+  const visibleRows = rows.slice(start, end);
+
   return (
     <div className="data-table-wrapper">
       <table className="data-table">
@@ -40,7 +48,7 @@ export function DataTable<T>({
               </td>
             </tr>
           ) : (
-            rows.map((row) => (
+            visibleRows.map((row) => (
               <tr key={getRowKey(row)}>
                 {columns.map((col) => (
                   <td key={col.key} style={{ textAlign: col.align ?? "left" }}>
@@ -52,6 +60,9 @@ export function DataTable<T>({
           )}
         </tbody>
       </table>
+      {rows.length > pageSize && (
+        <TablePagination page={page} totalPages={totalPages} start={start} end={end} total={rows.length} onPageChange={setPage} />
+      )}
     </div>
   );
 }

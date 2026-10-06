@@ -2,8 +2,17 @@ import { Router } from "express";
 import { authenticate } from "../../middleware/authenticate";
 import { requireAdmin } from "../../middleware/requireAdmin";
 import { asyncHandler } from "../../middleware/asyncHandler";
-import { createAccountConfigSchema } from "./accountConfig.schema";
-import { createAccountConfig, listAccountConfigs } from "./accountConfig.service";
+import {
+  createAccountConfigSchema,
+  accountConfigIdParamSchema,
+  setAccountConfigActiveSchema,
+} from "./accountConfig.schema";
+import {
+  createAccountConfig,
+  listAccountConfigs,
+  registerAccountConfigWithChannex,
+  setAccountConfigActive,
+} from "./accountConfig.service";
 
 export const accountConfigRouter = Router();
 
@@ -23,5 +32,24 @@ accountConfigRouter.get(
   asyncHandler(async (_req, res) => {
     const accountConfigs = await listAccountConfigs();
     res.status(200).json({ accountConfigs });
+  })
+);
+
+accountConfigRouter.post(
+  "/:accountConfigId/register-with-channex",
+  asyncHandler(async (req, res) => {
+    const { accountConfigId } = accountConfigIdParamSchema.parse(req.params);
+    const result = await registerAccountConfigWithChannex(accountConfigId, req.correlationId);
+    res.status(200).json(result);
+  })
+);
+
+accountConfigRouter.patch(
+  "/:accountConfigId/active",
+  asyncHandler(async (req, res) => {
+    const { accountConfigId } = accountConfigIdParamSchema.parse(req.params);
+    const { isActive } = setAccountConfigActiveSchema.parse(req.body);
+    const result = await setAccountConfigActive(accountConfigId, isActive, req.correlationId);
+    res.status(200).json(result);
   })
 );

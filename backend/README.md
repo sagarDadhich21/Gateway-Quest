@@ -224,9 +224,11 @@ already-created BQ booking is never re-created even on a retried "new" revision.
    ```
    Copy `webhookSecret` from the response - it's shown **once** and never returned
    again (`GET /account-config` redacts it on every later read).
-2. Register the webhook with Channex (`POST {CHANNEX_BASE_URL}/webhooks`), pointing
-   `callback_url` at `https://<your-public-host>/api/gq/webhooks/channex` and setting
-   `headers: {"x-channex-webhook-secret": "<webhookSecret from step 1>"}`.
+2. Register the webhook with Channex - no manual curl needed, GQ does the
+   `POST {CHANNEX_BASE_URL}/webhooks` call for you:
+   `POST /api/gq/account-config/:accountConfigId/register-with-channex` (same
+   token, no body), or the **"Register with Channex"** button in the frontend's
+   Connection page.
 3. For local dev without a public URL, run the recovery poller manually instead of
    relying on the webhook - see below.
 

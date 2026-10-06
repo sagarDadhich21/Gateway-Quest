@@ -16,9 +16,12 @@ export const bookingRouter = Router();
  * the `headers` field when the webhook is registered with Channex (POST /webhooks).
  * This is the actual, complete verification mechanism available: Channex documents no
  * cryptographic signature scheme for webhooks at all (confirmed from their own docs,
- * not assumed) - only this kind of shared-secret comparison.
+ * not assumed) - only this kind of shared-secret comparison. Exported so
+ * accountConfig.service.ts's registerAccountConfigWithChannex() sets the exact same
+ * header name when registering with Channex, rather than a second hardcoded copy that
+ * could drift out of sync.
  */
-const WEBHOOK_SECRET_HEADER = "x-channex-webhook-secret";
+export const WEBHOOK_SECRET_HEADER = "x-channex-webhook-secret";
 
 /**
  * POST /webhooks/channex - public, no user JWT (see middleware wiring in routes/

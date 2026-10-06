@@ -22,6 +22,11 @@ import {
   ChannexRestrictionsReadResponse,
   ChannexRoomTypeCreateRequest,
   ChannexRoomTypeCreateResponse,
+  ChannexWebhookCreateRequest,
+  ChannexWebhookCreateResponse,
+  ChannexWebhookListResponse,
+  ChannexWebhookUpdateRequest,
+  ChannexWebhookUpdateResponse,
 } from "./channex.types";
 
 const CREATE_PROPERTY_ENDPOINT = "/properties";
@@ -33,6 +38,7 @@ const READ_AVAILABILITY_ENDPOINT = "/availability";
 const READ_RESTRICTIONS_ENDPOINT = "/restrictions";
 const CHANNELS_ENDPOINT = "/channels";
 const ONE_TIME_TOKEN_ENDPOINT = "/auth/one_time_token";
+const WEBHOOKS_CREATE_ENDPOINT = "/webhooks";
 
 const channexHttp: AxiosInstance = axios.create({
   baseURL: env.CHANNEX_BASE_URL,
@@ -519,6 +525,53 @@ export async function createChannexOneTimeToken(
 ): Promise<ChannexOneTimeTokenResponse> {
   try {
     const response = await channexHttp.post<ChannexOneTimeTokenResponse>(ONE_TIME_TOKEN_ENDPOINT, payload);
+    return response.data;
+  } catch (err) {
+    throw toChannexError(err, correlationId);
+  }
+}
+
+/**
+ * POST /webhooks - the real registration call this whole flow used to require doing by
+ * hand (curl/Postman) against Channex directly. See accountConfig.service.ts's
+ * registerAccountConfigWithChannex() for how the shared-secret header actually gets
+ * attached.
+ */
+export async function createChannexWebhook(
+  payload: ChannexWebhookCreateRequest,
+  correlationId: string
+): Promise<ChannexWebhookCreateResponse> {
+  try {
+    const response = await channexHttp.post<ChannexWebhookCreateResponse>(WEBHOOKS_CREATE_ENDPOINT, payload);
+    return response.data;
+  } catch (err) {
+    throw toChannexError(err, correlationId);
+  }
+}
+
+/** GET /webhooks - see ChannexWebhookListResponse for why registerAccountConfigWithChannex() needs this. */
+export async function listChannexWebhooks(correlationId: string): Promise<ChannexWebhookListResponse> {
+  try {
+    const response = await channexHttp.get<ChannexWebhookListResponse>(WEBHOOKS_CREATE_ENDPOINT, {
+      params: { "pagination[limit]": 100 },
+    });
+    return response.data;
+  } catch (err) {
+    throw toChannexError(err, correlationId);
+  }
+}
+
+/** PUT /webhooks/{id} - updates an existing registration in place (url, secret header, active/send_data flags). */
+export async function updateChannexWebhook(
+  cxWebhookId: string,
+  payload: ChannexWebhookUpdateRequest,
+  correlationId: string
+): Promise<ChannexWebhookUpdateResponse> {
+  try {
+    const response = await channexHttp.put<ChannexWebhookUpdateResponse>(
+      `${WEBHOOKS_CREATE_ENDPOINT}/${cxWebhookId}`,
+      payload
+    );
     return response.data;
   } catch (err) {
     throw toChannexError(err, correlationId);

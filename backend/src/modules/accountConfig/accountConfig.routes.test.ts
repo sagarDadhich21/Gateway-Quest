@@ -6,9 +6,16 @@ import jwt from "jsonwebtoken";
 vi.mock("./accountConfig.service", () => ({
   createAccountConfig: vi.fn(),
   listAccountConfigs: vi.fn(),
+  registerAccountConfigWithChannex: vi.fn(),
+  setAccountConfigActive: vi.fn(),
 }));
 
-import { createAccountConfig, listAccountConfigs } from "./accountConfig.service";
+import {
+  createAccountConfig,
+  listAccountConfigs,
+  registerAccountConfigWithChannex,
+  setAccountConfigActive,
+} from "./accountConfig.service";
 import { createApp } from "../../app";
 
 function signToken(roles: string[]): string {
@@ -54,8 +61,10 @@ describe("POST /api/gq/account-config", () => {
       environment: "production",
       isActive: true,
       sendData: false,
+      cxWebhookId: null,
       createdAt: "2026-09-24T00:00:00.000Z",
       webhookSecret: "generated-secret",
+      existingActiveConfigsForUrl: 0,
     });
 
     const app = createApp();
@@ -97,6 +106,7 @@ describe("GET /api/gq/account-config", () => {
         environment: "production",
         isActive: true,
         sendData: false,
+        cxWebhookId: null,
         createdAt: "2026-09-24T00:00:00.000Z",
       },
     ]);
@@ -107,5 +117,123 @@ describe("GET /api/gq/account-config", () => {
     expect(res.status).toBe(200);
     expect(res.body.accountConfigs).toHaveLength(1);
     expect(res.body.accountConfigs[0]).not.toHaveProperty("webhookSecret");
+  });
+});
+
+describe("POST /api/gq/account-config/:accountConfigId/register-with-channex", () => {
+  const VALID_ID = "11111111-1111-1111-1111-111111111111";
+
+  it("rejects a non-admin session token", async () => {
+    const app = createApp();
+    const res = await request(app)
+      .post(`/api/gq/account-config/${VALID_ID}/register-with-channex`)
+      .set("Authorization", `Bearer ${NON_ADMIN_TOKEN}`);
+
+    expect(res.status).toBe(403);
+    expect(registerAccountConfigWithChannex).not.toHaveBeenCalled();
+  });
+
+  it("422s on a non-uuid id", async () => {
+    const app = createApp();
+    const res = await request(app)
+      .post("/api/gq/account-config/not-a-uuid/register-with-channex")
+      .set("Authorization", `Bearer ${ADMIN_TOKEN}`);
+
+    expect(res.status).toBe(422);
+    expect(registerAccountConfigWithChannex).not.toHaveBeenCalled();
+  });
+
+  it("registers with Channex for an admin session token and returns the updated config", async () => {
+    vi.mocked(registerAccountConfigWithChannex).mockResolvedValue({
+      id: VALID_ID,
+      bqPropertyId: 1,
+      webhookUrl: "https://example.com/webhooks/channex",
+      environment: "production",
+      isActive: true,
+      sendData: false,
+      cxWebhookId: "cx-webhook-1",
+      createdAt: "2026-09-24T00:00:00.000Z",
+      sharedWithOtherActiveConfigs: 0,
+    });
+
+    const app = createApp();
+    const res = await request(app)
+      .post(`/api/gq/account-config/${VALID_ID}/register-with-channex`)
+      .set("Authorization", `Bearer ${ADMIN_TOKEN}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.cxWebhookId).toBe("cx-webhook-1");
+    expect(registerAccountConfigWithChannex).toHaveBeenCalledWith(VALID_ID, expect.any(String));
+  });
+
+  it("surfaces sharedWithOtherActiveConfigs so the frontend can warn about a stale secret", async () => {
+    vi.mocked(registerAccountConfigWithChannex).mockResolvedValue({
+      id: VALID_ID,
+      bqPropertyId: 1,
+      webhookUrl: "https://example.com/webhooks/channex",
+      environment: "production",
+      isActive: true,
+      sendData: false,
+      cxWebhookId: "cx-webhook-1",
+      createdAt: "2026-09-24T00:00:00.000Z",
+      sharedWithOtherActiveConfigs: 2,
+    });
+
+    const app = createApp();
+    const res = await request(app)
+      .post(`/api/gq/account-config/${VALID_ID}/register-with-channex`)
+      .set("Authorization", `Bearer ${ADMIN_TOKEN}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.sharedWithOtherActiveConfigs).toBe(2);
+  });
+});
+
+describe("PATCH /api/gq/account-config/:accountConfigId/active", () => {
+  const VALID_ID = "11111111-1111-1111-1111-111111111111";
+
+  it("rejects a non-admin session token", async () => {
+    const app = createApp();
+    const res = await request(app)
+      .patch(`/api/gq/account-config/${VALID_ID}/active`)
+      .set("Authorization", `Bearer ${NON_ADMIN_TOKEN}`)
+      .send({ isActive: false });
+
+    expect(res.status).toBe(403);
+    expect(setAccountConfigActive).not.toHaveBeenCalled();
+  });
+
+  it("422s on a non-boolean isActive", async () => {
+    const app = createApp();
+    const res = await request(app)
+      .patch(`/api/gq/account-config/${VALID_ID}/active`)
+      .set("Authorization", `Bearer ${ADMIN_TOKEN}`)
+      .send({ isActive: "nope" });
+
+    expect(res.status).toBe(422);
+    expect(setAccountConfigActive).not.toHaveBeenCalled();
+  });
+
+  it("deactivates a config for an admin session token", async () => {
+    vi.mocked(setAccountConfigActive).mockResolvedValue({
+      id: VALID_ID,
+      bqPropertyId: 1,
+      webhookUrl: "https://example.com/webhooks/channex",
+      environment: "production",
+      isActive: false,
+      sendData: false,
+      cxWebhookId: "cx-webhook-1",
+      createdAt: "2026-09-24T00:00:00.000Z",
+    });
+
+    const app = createApp();
+    const res = await request(app)
+      .patch(`/api/gq/account-config/${VALID_ID}/active`)
+      .set("Authorization", `Bearer ${ADMIN_TOKEN}`)
+      .send({ isActive: false });
+
+    expect(res.status).toBe(200);
+    expect(res.body.isActive).toBe(false);
+    expect(setAccountConfigActive).toHaveBeenCalledWith(VALID_ID, false, expect.any(String));
   });
 });

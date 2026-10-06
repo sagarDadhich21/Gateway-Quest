@@ -28,6 +28,7 @@ export type AppErrorCode =
   | "UNMAPPED_BOOKING_ROOM_OR_RATE"
   | "WEBHOOK_UNAUTHORIZED"
   | "ADMIN_ONLY"
+  | "ACCOUNT_CONFIG_NOT_FOUND"
   | "BQ_UPSTREAM_ERROR"
   | "BQ_UPSTREAM_UNAVAILABLE"
   | "PRICING_SERVICE_UPSTREAM_ERROR"
@@ -151,4 +152,8 @@ export function webhookUnauthorizedError(): AppError {
 
 export function adminOnlyError(): AppError {
   return new AppError("ADMIN_ONLY", 403, "This action requires the Super_Admin role.");
+}
+
+export function accountConfigNotFoundError(): AppError {
+  return new AppError("ACCOUNT_CONFIG_NOT_FOUND", 404, "Account config not found.");
 }

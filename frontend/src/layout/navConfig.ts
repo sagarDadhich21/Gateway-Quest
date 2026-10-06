@@ -25,7 +25,7 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    title: "EQ — Source of Truth",
+    title: "EQ — Source Adapter",
     items: [
       { label: "Inventory Calendar", path: "/eq/inventory-calendar", icon: "calendar" },
       { label: "Inbound ARI Feed", path: "/eq/inbound-ari-feed", icon: "arrow-down" },

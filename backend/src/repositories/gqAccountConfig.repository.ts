@@ -33,3 +33,35 @@ export async function createAccountConfig(input: CreateAccountConfigInput): Prom
 export async function listAccountConfigs(): Promise<gq_account_config[]> {
   return prisma.gq_account_config.findMany({ orderBy: { created_at: "desc" } });
 }
+
+export async function findAccountConfigById(id: string): Promise<gq_account_config | null> {
+  return prisma.gq_account_config.findUnique({ where: { id } });
+}
+
+export async function setChannexWebhookId(id: string, cxWebhookId: string): Promise<gq_account_config> {
+  return prisma.gq_account_config.update({ where: { id }, data: { cx_webhook_id: cxWebhookId } });
+}
+
+export async function setAccountConfigActive(id: string, isActive: boolean): Promise<gq_account_config> {
+  return prisma.gq_account_config.update({ where: { id }, data: { is_active: isActive } });
+}
+
+/** Other active rows pointing at the same Channex webhook - see RegisterAccountConfigResponseDto. */
+export async function countOtherActiveConfigsWithWebhookId(cxWebhookId: string, excludeId: string): Promise<number> {
+  return prisma.gq_account_config.count({
+    where: { cx_webhook_id: cxWebhookId, is_active: true, id: { not: excludeId } },
+  });
+}
+
+/**
+ * Other active rows that already use this exact webhook_url - a pre-registration
+ * warning for createAccountConfig(), since Channex allows only one webhook per
+ * (callback_url, event_mask) pair, so creating yet another config for a URL that's
+ * already active will just converge onto the same Channex webhook once registered (see
+ * RegisterAccountConfigResponseDto.sharedWithOtherActiveConfigs).
+ */
+export async function countActiveConfigsWithWebhookUrl(webhookUrl: string, excludeId: string): Promise<number> {
+  return prisma.gq_account_config.count({
+    where: { webhook_url: webhookUrl, is_active: true, id: { not: excludeId } },
+  });
+}

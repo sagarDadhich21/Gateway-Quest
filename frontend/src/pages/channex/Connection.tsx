@@ -1,7 +1,12 @@
 import { useEffect, useState } from "react";
 import { useIsSuperAdmin } from "../../auth/useIsSuperAdmin";
 import { extractErrorMessage } from "../../api/client";
-import { createAccountConfig, listAccountConfigs } from "../../api/gqApi";
+import {
+  createAccountConfig,
+  listAccountConfigs,
+  registerAccountConfigWithChannex,
+  setAccountConfigActive,
+} from "../../api/gqApi";
 import { AccountConfigResponse } from "../../api/types";
 import { DataTable, DataTableColumn } from "../../components/DataTable";
 import { PageHeader } from "../../components/PageHeader";
@@ -31,8 +36,21 @@ export function Connection() {
   const [rows, setRows] = useState<AccountConfigResponse[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [registeringId, setRegisteringId] = useState<string | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
   const { showModal, closeModal } = useModal();
   const toast = useToast();
+
+  function registeredToastMessage(sharedWithOtherActiveConfigs: number): [string, "ok" | "warn"] {
+    if (sharedWithOtherActiveConfigs === 0) {
+      return ["Registered with Channex.", "ok"];
+    }
+    return [
+      `Registered with Channex — but shared with ${sharedWithOtherActiveConfigs} other active config(s) for this URL. ` +
+        "Channex only keeps one secret per webhook, so this is now the only one that's actually live — deactivate the others.",
+      "warn",
+    ];
+  }
 
   async function load() {
     setLoading(true);
@@ -51,54 +69,135 @@ export function Connection() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSuperAdmin]);
 
-  function showSecret(secret: string) {
-    showModal({
-      title: "Webhook secret — copy it now",
-      wide: true,
-      body: (
-        <>
-          <p className="muted small" style={{ marginTop: 0 }}>
-            Shown once, right now — GQ never returns it again after this. Paste it into
-            Channex's webhook <code>headers</code> field as{" "}
-            <code>x-channex-webhook-secret</code> when registering{" "}
-            <code>POST {"{CHANNEX_BASE_URL}"}/webhooks</code>.
-          </p>
-          <div
-            className="mono small"
-            style={{
-              wordBreak: "break-all",
-              padding: "10px 12px",
-              background: "var(--bg)",
-              border: "1px solid var(--border)",
-              borderRadius: 8,
-            }}
-          >
-            {secret}
-          </div>
-        </>
-      ),
-      foot: (
-        <>
-          <button
-            type="button"
-            className="button button--ghost"
-            onClick={async () => {
-              try {
-                await navigator.clipboard.writeText(secret);
-                toast("Secret copied to clipboard.");
-              } catch {
-                toast("Couldn't copy automatically — select and copy it manually.", "warn");
-              }
-            }}
-          >
-            Copy
-          </button>
-          <button type="button" className="button button--primary" onClick={closeModal}>
-            Done
-          </button>
-        </>
-      ),
-    });
+  async function registerWithChannex(id: string) {
+    setRegisteringId(id);
+    try {
+      const result = await registerAccountConfigWithChannex(id);
+      const [message, tone] = registeredToastMessage(result.sharedWithOtherActiveConfigs);
+      toast(message, tone);
+      await load();
+    } catch (err) {
+      toast(extractErrorMessage(err), "warn");
+    } finally {
+      setRegisteringId(null);
+    }
+  }
+
+  async function toggleActive(id: string, isActive: boolean) {
+    setTogglingId(id);
+    try {
+      await setAccountConfigActive(id, isActive);
+      toast(isActive ? "Config activated." : "Config deactivated — its secret is no longer checked against inbound webhooks.");
+      await load();
+    } catch (err) {
+      toast(extractErrorMessage(err), "warn");
+    } finally {
+      setTogglingId(null);
+    }
+  }
+
+  function showSecret(id: string, secret: string, existingActiveConfigsForUrl: number) {
+    let registering = false;
+    let registerError: string | null = null;
+    let registered = false;
+    let sharedWithOtherActiveConfigs = 0;
+
+    function rerender() {
+      showModal({
+        title: "Webhook secret — copy it now",
+        wide: true,
+        body: (
+          <>
+            <p className="muted small" style={{ marginTop: 0 }}>
+              Shown once, right now — GQ never returns it again after this. Click{" "}
+              <strong>Register with Channex</strong> below to have GQ call{" "}
+              <code>POST {"{CHANNEX_BASE_URL}"}/webhooks</code> for you, or copy it and
+              paste it into Channex's webhook <code>headers</code> field as{" "}
+              <code>x-channex-webhook-secret</code> yourself.
+            </p>
+            {!registered && existingActiveConfigsForUrl > 0 && (
+              <p className="form-error">
+                {existingActiveConfigsForUrl} other active config(s) already use this exact webhook URL.
+                Channex allows only one webhook per URL, so registering this one will adopt the same
+                Channex webhook as those — making this the only secret that's actually live. Consider
+                deactivating the others instead of keeping both.
+              </p>
+            )}
+            {registerError && <p className="form-error">{registerError}</p>}
+            {registered && sharedWithOtherActiveConfigs === 0 && (
+              <p className="small" style={{ color: "var(--success, green)" }}>
+                Registered with Channex.
+              </p>
+            )}
+            {registered && sharedWithOtherActiveConfigs > 0 && (
+              <p className="form-error">
+                Registered — but shared with {sharedWithOtherActiveConfigs} other active config(s) for this
+                URL. Channex only keeps one secret per webhook, so this is now the only one that's actually
+                live. Deactivate the others from the table below.
+              </p>
+            )}
+            <div
+              className="mono small"
+              style={{
+                wordBreak: "break-all",
+                padding: "10px 12px",
+                background: "var(--bg)",
+                border: "1px solid var(--border)",
+                borderRadius: 8,
+              }}
+            >
+              {secret}
+            </div>
+          </>
+        ),
+        foot: (
+          <>
+            <button
+              type="button"
+              className="button button--ghost"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(secret);
+                  toast("Secret copied to clipboard.");
+                } catch {
+                  toast("Couldn't copy automatically — select and copy it manually.", "warn");
+                }
+              }}
+            >
+              Copy
+            </button>
+            <button
+              type="button"
+              className="button button--ghost"
+              disabled={registering}
+              onClick={async () => {
+                registering = true;
+                registerError = null;
+                rerender();
+                try {
+                  const result = await registerAccountConfigWithChannex(id);
+                  registered = true;
+                  sharedWithOtherActiveConfigs = result.sharedWithOtherActiveConfigs;
+                  await load();
+                } catch (err) {
+                  registerError = extractErrorMessage(err);
+                } finally {
+                  registering = false;
+                  rerender();
+                }
+              }}
+            >
+              {registering ? "Registering…" : "Register with Channex"}
+            </button>
+            <button type="button" className="button button--primary" onClick={closeModal}>
+              Done
+            </button>
+          </>
+        ),
+      });
+    }
+
+    rerender();
   }
 
   function openCreate() {
@@ -216,7 +315,7 @@ export function Connection() {
                     sendData,
                   });
                   closeModal();
-                  showSecret(result.webhookSecret);
+                  showSecret(result.id, result.webhookSecret, result.existingActiveConfigsForUrl);
                   await load();
                 } catch (err) {
                   creating = false;
@@ -245,7 +344,41 @@ export function Connection() {
       render: (r) => (r.isActive ? <Pill label="Active" tone="success" /> : <Pill label="Inactive" tone="neutral" />),
     },
     { key: "sendData", label: "Send data", render: (r) => (r.sendData ? "Yes" : "No") },
+    {
+      key: "cxWebhookId",
+      label: "Channex",
+      render: (r) =>
+        r.cxWebhookId ? (
+          <Pill label="Registered" tone="success" />
+        ) : (
+          <Pill label="Not registered" tone="warning" />
+        ),
+    },
     { key: "created", label: "Created", render: (r) => formatDateTime(r.createdAt) },
+    {
+      key: "actions",
+      label: "",
+      render: (r) => (
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            type="button"
+            className="button button--ghost"
+            disabled={registeringId === r.id}
+            onClick={() => registerWithChannex(r.id)}
+          >
+            {registeringId === r.id ? "Registering…" : r.cxWebhookId ? "Re-register" : "Register"}
+          </button>
+          <button
+            type="button"
+            className="button button--ghost"
+            disabled={togglingId === r.id}
+            onClick={() => toggleActive(r.id, !r.isActive)}
+          >
+            {togglingId === r.id ? "…" : r.isActive ? "Deactivate" : "Activate"}
+          </button>
+        </div>
+      ),
+    },
   ];
 
   if (!isSuperAdmin) {
