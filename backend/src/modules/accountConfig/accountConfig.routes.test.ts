@@ -7,6 +7,7 @@ vi.mock("./accountConfig.service", () => ({
   createAccountConfig: vi.fn(),
   listAccountConfigs: vi.fn(),
   registerAccountConfigWithChannex: vi.fn(),
+  rotateAccountConfigSecret: vi.fn(),
   setAccountConfigActive: vi.fn(),
 }));
 
@@ -14,9 +15,11 @@ import {
   createAccountConfig,
   listAccountConfigs,
   registerAccountConfigWithChannex,
+  rotateAccountConfigSecret,
   setAccountConfigActive,
 } from "./accountConfig.service";
 import { createApp } from "../../app";
+import { AppError } from "../../errors/AppError";
 
 function signToken(roles: string[]): string {
   return jwt.sign(
@@ -46,35 +49,35 @@ describe("POST /api/gq/account-config", () => {
     const res = await request(app)
       .post("/api/gq/account-config")
       .set("Authorization", `Bearer ${NON_ADMIN_TOKEN}`)
-      .send({ webhookUrl: "https://example.com/webhooks/channex", apiKey: "k", environment: "production" });
+      .send({});
 
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe("ADMIN_ONLY");
     expect(createAccountConfig).not.toHaveBeenCalled();
   });
 
-  it("creates a config for an admin session token and returns the webhook secret", async () => {
+  it("creates a config for an admin session token and returns the webhook secret - webhookUrl/environment are server-derived, not accepted from the body", async () => {
     vi.mocked(createAccountConfig).mockResolvedValue({
       id: "cfg-1",
       bqPropertyId: null,
       webhookUrl: "https://example.com/webhooks/channex",
-      environment: "production",
+      environment: "staging",
       isActive: true,
       sendData: false,
       cxWebhookId: null,
       createdAt: "2026-09-24T00:00:00.000Z",
       webhookSecret: "generated-secret",
-      existingActiveConfigsForUrl: 0,
     });
 
     const app = createApp();
     const res = await request(app)
       .post("/api/gq/account-config")
       .set("Authorization", `Bearer ${ADMIN_TOKEN}`)
-      .send({ webhookUrl: "https://example.com/webhooks/channex", apiKey: "k", environment: "production" });
+      .send({ sendData: true });
 
     expect(res.status).toBe(201);
     expect(res.body.webhookSecret).toBe("generated-secret");
+    expect(res.body).not.toHaveProperty("apiKey");
   });
 
   it("422s on an invalid body", async () => {
@@ -82,10 +85,27 @@ describe("POST /api/gq/account-config", () => {
     const res = await request(app)
       .post("/api/gq/account-config")
       .set("Authorization", `Bearer ${ADMIN_TOKEN}`)
-      .send({ webhookUrl: "not-a-url", apiKey: "", environment: "" });
+      .send({ bqPropertyId: -1 });
 
     expect(res.status).toBe(422);
     expect(createAccountConfig).not.toHaveBeenCalled();
+  });
+
+  it("409s with ACCOUNT_CONFIG_SCOPE_TAKEN when the service rejects a duplicate scope", async () => {
+    vi.mocked(createAccountConfig).mockRejectedValue(
+      new AppError("ACCOUNT_CONFIG_SCOPE_TAKEN", 409, "A config already exists for this property.", {
+        existingAccountConfigId: "existing-cfg",
+      })
+    );
+
+    const app = createApp();
+    const res = await request(app)
+      .post("/api/gq/account-config")
+      .set("Authorization", `Bearer ${ADMIN_TOKEN}`)
+      .send({ bqPropertyId: 1 });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe("ACCOUNT_CONFIG_SCOPE_TAKEN");
   });
 });
 
@@ -186,6 +206,54 @@ describe("POST /api/gq/account-config/:accountConfigId/register-with-channex", (
 
     expect(res.status).toBe(200);
     expect(res.body.sharedWithOtherActiveConfigs).toBe(2);
+  });
+});
+
+describe("POST /api/gq/account-config/:accountConfigId/rotate-secret", () => {
+  const VALID_ID = "11111111-1111-1111-1111-111111111111";
+
+  it("rejects a non-admin session token", async () => {
+    const app = createApp();
+    const res = await request(app)
+      .post(`/api/gq/account-config/${VALID_ID}/rotate-secret`)
+      .set("Authorization", `Bearer ${NON_ADMIN_TOKEN}`);
+
+    expect(res.status).toBe(403);
+    expect(rotateAccountConfigSecret).not.toHaveBeenCalled();
+  });
+
+  it("422s on a non-uuid id", async () => {
+    const app = createApp();
+    const res = await request(app)
+      .post("/api/gq/account-config/not-a-uuid/rotate-secret")
+      .set("Authorization", `Bearer ${ADMIN_TOKEN}`);
+
+    expect(res.status).toBe(422);
+    expect(rotateAccountConfigSecret).not.toHaveBeenCalled();
+  });
+
+  it("rotates the secret for an admin session token and returns it once", async () => {
+    vi.mocked(rotateAccountConfigSecret).mockResolvedValue({
+      id: VALID_ID,
+      bqPropertyId: 1,
+      webhookUrl: "https://example.com/webhooks/channex",
+      environment: "staging",
+      isActive: true,
+      sendData: false,
+      cxWebhookId: "cx-webhook-1",
+      createdAt: "2026-09-24T00:00:00.000Z",
+      webhookSecret: "rotated-secret",
+    });
+
+    const app = createApp();
+    const res = await request(app)
+      .post(`/api/gq/account-config/${VALID_ID}/rotate-secret`)
+      .set("Authorization", `Bearer ${ADMIN_TOKEN}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.webhookSecret).toBe("rotated-secret");
+    expect(res.body.id).toBe(VALID_ID);
+    expect(rotateAccountConfigSecret).toHaveBeenCalledWith(VALID_ID, expect.any(String));
   });
 });
 

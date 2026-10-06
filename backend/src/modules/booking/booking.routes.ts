@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getChannexBooking } from "../../clients/channex/channex.client";
+import { getChannexBooking, getChannexRevisionFeed } from "../../clients/channex/channex.client";
 import { webhookUnauthorizedError } from "../../errors/AppError";
 import { asyncHandler } from "../../middleware/asyncHandler";
 import { findActiveWebhookSecrets } from "../../repositories/gqAccountConfig.repository";
@@ -57,18 +57,67 @@ bookingRouter.post(
   })
 );
 
+/**
+ * Channex's own webhook docs (docs.channex.io/api-v.1-documentation/webhook-collection)
+ * say booking_new/booking_modification/booking_cancellation/non_acked_booking all carry
+ * `payload.booking_id` - but confirmed live on 2026-10-06, a real booking_new/booking
+ * pair arrived with no usable id in `payload` at all (payload.booking_id and
+ * payload.revision_id both absent), so GQ fell into the non-booking-event branch below
+ * and silently discarded a real booking. Any event name in this list is booking-related
+ * and must never be discarded just because its payload didn't carry an id - see the
+ * fallback in handleWebhookAsync.
+ */
+const BOOKING_CATEGORY_EVENT_PREFIX = "booking";
+const NON_ACKED_BOOKING_EVENT = "non_acked_booking";
+
+function isBookingCategoryEvent(event: string): boolean {
+  return event === NON_ACKED_BOOKING_EVENT || event.startsWith(BOOKING_CATEGORY_EVENT_PREFIX);
+}
+
+// Page size for the fallback feed pull below - this is a live-triggered catch-up for
+// the one event that just fired, not the recovery poller's historical catch-up, so a
+// small page is enough to find the triggering revision among the most recent ones.
+const FALLBACK_FEED_PAGE_LIMIT = 20;
+
 async function handleWebhookAsync(body: ChannexWebhookBody, correlationId: string): Promise<void> {
   try {
     const bookingId = body.payload?.booking_id;
-    if (!bookingId) {
+    if (bookingId) {
+      const detail = await getChannexBooking(bookingId, correlationId);
+      await processRevision(detail.data.attributes, correlationId);
+      return;
+    }
+
+    if (!isBookingCategoryEvent(body.event)) {
       // Non-booking events (ari, message, sync_error, channel lifecycle, etc.) have no
       // revision to process - acknowledged at the HTTP level only, nothing further to do.
       logger.info("channex_webhook_non_booking_event", { correlationId, event: body.event });
       return;
     }
 
-    const detail = await getChannexBooking(bookingId, correlationId);
-    await processRevision(detail.data.attributes, correlationId);
+    // A booking-category event arrived with no payload.booking_id to pull the single
+    // booking by - fall back to the property's revision feed instead of discarding it.
+    // This is the exact same read+processRevision() the recovery poller
+    // (scripts/run-revision-feed.ts) uses, so idempotency/mapping/error handling behave
+    // identically; it's just triggered immediately by this webhook instead of waiting
+    // for the poller's ~15-minute schedule.
+    const cxPropertyId = body.property_id;
+    if (!cxPropertyId) {
+      throw new Error(
+        `Booking-category webhook event "${body.event}" has no payload.booking_id and no root property_id to recover via the revision feed.`
+      );
+    }
+
+    logger.warn("channex_webhook_booking_event_missing_id_falling_back_to_feed", {
+      correlationId,
+      event: body.event,
+      cxPropertyId,
+    });
+
+    const feed = await getChannexRevisionFeed(cxPropertyId, 1, FALLBACK_FEED_PAGE_LIMIT, correlationId);
+    for (const revision of feed.data) {
+      await processRevision(revision.attributes, correlationId);
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     logger.error("channex_webhook_async_processing_failed", { correlationId, message });

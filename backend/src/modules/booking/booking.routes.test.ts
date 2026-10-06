@@ -12,6 +12,7 @@ vi.mock("../../repositories/gqErrorQueue.repository", () => ({
 }));
 vi.mock("../../clients/channex/channex.client", () => ({
   getChannexBooking: vi.fn().mockResolvedValue({ data: { attributes: {} } }),
+  getChannexRevisionFeed: vi.fn(),
 }));
 vi.mock("./booking.service", () => ({
   processRevision: vi.fn().mockResolvedValue({ outcome: "skipped_already_acked", revisionId: "x" }),
@@ -20,6 +21,7 @@ vi.mock("./booking.service", () => ({
 import { findActiveWebhookSecrets } from "../../repositories/gqAccountConfig.repository";
 import { createWebhookLog } from "../../repositories/gqWebhookLog.repository";
 import { createErrorQueueEntry } from "../../repositories/gqErrorQueue.repository";
+import { getChannexRevisionFeed } from "../../clients/channex/channex.client";
 import { processRevision } from "./booking.service";
 import { createApp } from "../../app";
 
@@ -126,6 +128,59 @@ describe("POST /api/gq/webhooks/channex - monitoring writes", () => {
         source: "channex_webhook_async_processing",
         errorMessage: "boom",
         payload: expect.objectContaining({ bookingId: "cx-booking-1" }),
+      })
+    );
+  });
+});
+
+describe("POST /api/gq/webhooks/channex - booking-category events with no payload.booking_id", () => {
+  it("falls back to pulling the property's revision feed, instead of silently discarding a real booking event", async () => {
+    vi.mocked(getChannexRevisionFeed).mockResolvedValue({
+      data: [{ attributes: { id: "rev-1" } }, { attributes: { id: "rev-2" } }],
+      meta: { total: 2, page: 1, limit: 20 },
+    } as never);
+
+    const app = createApp();
+    await request(app)
+      .post("/api/gq/webhooks/channex")
+      .set("x-channex-webhook-secret", REAL_SECRET)
+      // Real-world shape confirmed 2026-10-06: booking_new arrived with no payload at
+      // all, only the root property_id.
+      .send({ event: "booking_new", property_id: "cx-prop-1" });
+    await flushAsync();
+
+    expect(getChannexRevisionFeed).toHaveBeenCalledWith("cx-prop-1", 1, 20, expect.any(String));
+    expect(processRevision).toHaveBeenCalledTimes(2);
+    expect(processRevision).toHaveBeenCalledWith({ id: "rev-1" }, expect.any(String));
+    expect(processRevision).toHaveBeenCalledWith({ id: "rev-2" }, expect.any(String));
+    expect(createErrorQueueEntry).not.toHaveBeenCalled();
+  });
+
+  it("does not fall back for a non-booking event with no payload - stays a no-op as before", async () => {
+    const app = createApp();
+    await request(app)
+      .post("/api/gq/webhooks/channex")
+      .set("x-channex-webhook-secret", REAL_SECRET)
+      .send({ event: "sync_error", property_id: "cx-prop-1" });
+    await flushAsync();
+
+    expect(getChannexRevisionFeed).not.toHaveBeenCalled();
+    expect(processRevision).not.toHaveBeenCalled();
+  });
+
+  it("queues an error-queue entry when a booking-category event has neither a booking_id nor a property_id to recover with", async () => {
+    const app = createApp();
+    await request(app)
+      .post("/api/gq/webhooks/channex")
+      .set("x-channex-webhook-secret", REAL_SECRET)
+      .send({ event: "booking" });
+    await flushAsync();
+
+    expect(getChannexRevisionFeed).not.toHaveBeenCalled();
+    expect(createErrorQueueEntry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: "channex_webhook_async_processing",
+        errorMessage: expect.stringContaining("no payload.booking_id and no root property_id"),
       })
     );
   });

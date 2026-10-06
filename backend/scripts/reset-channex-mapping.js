@@ -15,12 +15,22 @@
 //      still unresolved" confusion after a reset)
 //   7. Clears roomtype.cx_room_type_id -> NULL for every room type on the property (BQ)
 //   8. Clears property.cx_property_id -> NULL for the property itself (BQ)
+//   9. Deletes every row from the 4 Monitoring tables - gq_push_task, gq_api_log,
+//      gq_webhook_log, gq_error_queue - ENTIRELY, account-wide, not just for this
+//      property. None of these 4 carry a bq_property_id at all (confirmed in
+//      backend/README.md's Monitoring section), so there is no way to scope this to one
+//      property; running this script against any property clears all of them for every
+//      property.
+//   10. Deletes every gq_account_config row too - ALSO entirely, account-wide (it only
+//       optionally carries a bq_property_id, so "just this property's rows" would still
+//       leave the global one and any other property's rows behind). This deletes the
+//       live webhook secret(s) - every inbound Channex webhook call will be rejected
+//       with 401 WEBHOOK_UNAUTHORIZED until a new config is created and registered with
+//       Channex again (see backend/webhooks.md).
 //
 // Also prints the property's current BQ currency/country/timezone before doing
 // anything, purely as a sanity check to catch a wrong value before re-onboarding with
 // it - this script never modifies those fields itself.
-//
-// Does NOT touch gq_push_task (not property-scoped in the schema at all).
 //
 // Run from gq/backend (needs a real .env there with DATABASE_URL):
 //   node scripts/reset-channex-mapping.js <propertyId>
@@ -157,6 +167,28 @@ const prisma = new PrismaClient();
     propertyId
   );
   console.log("property.cx_property_id cleared for", propertyUpdated, "row(s)");
+
+  // Monitoring tables - account-wide, not property-scoped (no bq_property_id column on
+  // any of the 4), so this clears them for every property, not just propertyId above.
+  console.log("Clearing Monitoring tables (account-wide - not scoped to this property)...");
+
+  const pushTasksDeleted = await prisma.gq_push_task.deleteMany({});
+  console.log("gq_push_task deleted:", pushTasksDeleted.count);
+
+  const apiLogsDeleted = await prisma.gq_api_log.deleteMany({});
+  console.log("gq_api_log deleted:", apiLogsDeleted.count);
+
+  const webhookLogDeleted = await prisma.gq_webhook_log.deleteMany({});
+  console.log("gq_webhook_log deleted:", webhookLogDeleted.count);
+
+  const errorQueueDeleted = await prisma.gq_error_queue.deleteMany({});
+  console.log("gq_error_queue deleted:", errorQueueDeleted.count);
+
+  // Also account-wide - webhook secrets/registrations, not scoped to this property
+  // either. Deleting these breaks live webhook delivery until a new config is created
+  // and registered with Channex again.
+  const accountConfigsDeleted = await prisma.gq_account_config.deleteMany({});
+  console.log("gq_account_config deleted:", accountConfigsDeleted.count);
 
   await prisma.$disconnect();
   console.log("Done.");

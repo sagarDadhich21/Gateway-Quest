@@ -762,11 +762,7 @@ const accountConfigCreatedResponseSchema = registry.register(
   "AccountConfigCreatedResponse",
   accountConfigResponseSchema.extend({
     webhookSecret: z.string().openapi({
-      description: "Only ever returned here, at creation time - use it as the `headers` value when registering the webhook with Channex, and as this endpoint's own x-channex-webhook-secret. Not retrievable again afterward.",
-    }),
-    existingActiveConfigsForUrl: z.number().int().nonnegative().openapi({
-      description:
-        "Count of other active configs that already use this exact webhookUrl, at creation time. Channex allows only one webhook per (callback_url, event_mask) pair, so a value > 0 means registering this new config with Channex will just adopt the same webhook the others already use - consider reusing an existing config or deactivating the older ones instead of creating more.",
+      description: "Only ever returned here, at creation time and by POST .../rotate-secret - use it as the `headers` value when registering the webhook with Channex, and as this endpoint's own x-channex-webhook-secret. Not retrievable again afterward.",
     }),
   })
 );
@@ -787,12 +783,13 @@ registry.registerPath({
   tags: ["Account config"],
   summary: "Create a Channex account/webhook config (admin only)",
   description:
-    "Generates a random webhook_secret server-side and persists it as an active gq_account_config row - this is what POST /webhooks/channex checks incoming requests against. Requires the caller's GQ token to carry BQ's 'Super_Admin' role. Always succeeds even if another active config already uses the same webhookUrl - see existingActiveConfigsForUrl on the response for a non-blocking warning about that.",
+    "Generates a random webhook_secret server-side and persists it as an active gq_account_config row - this is what POST /webhooks/channex checks incoming requests against. webhookUrl is always env.PUBLIC_WEBHOOK_BASE_URL + the fixed webhook path, and environment always mirrors env.CHANNEX_ENVIRONMENT - neither is accepted from the request body, only bqPropertyId (optional - omit for a global config) and sendData. Requires the caller's GQ token to carry BQ's 'Super_Admin' role. Two partial unique indexes on bq_property_id guarantee at most one row per scope ever - creating a second config for a scope that already has one returns 409 ACCOUNT_CONFIG_SCOPE_TAKEN; use POST .../rotate-secret on the existing row instead.",
   security: AUTH,
   request: { body: { content: { "application/json": { schema: createAccountConfigSchema } } } },
   responses: {
     201: { description: "Created - webhookSecret is shown here only", content: { "application/json": { schema: accountConfigCreatedResponseSchema } } },
     403: errorResponse("Caller's token does not carry the Super_Admin role"),
+    409: errorResponse("A config already exists for this scope - rotate its secret instead"),
     422: errorResponse("Request validation failed"),
   },
 });
@@ -821,6 +818,22 @@ registry.registerPath({
   request: { params: accountConfigIdParamSchema },
   responses: {
     200: { description: "Registered - cxWebhookId now set", content: { "application/json": { schema: registerAccountConfigResponseSchema } } },
+    403: errorResponse("Caller's token does not carry the Super_Admin role"),
+    404: errorResponse("Account config not found"),
+  },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/account-config/{accountConfigId}/rotate-secret",
+  tags: ["Account config"],
+  summary: "Generate a new secret for an existing config, in place (admin only)",
+  description:
+    "The supported way to change a config's secret: same row, same id, same cxWebhookId once re-registered - replaces create-a-new-row-and-remember-to-deactivate-the-old-one, which was the actual source of the duplicate gq_account_config rows this table used to accumulate. The new secret isn't live on Channex until POST .../register-with-channex is called again with it.",
+  security: AUTH,
+  request: { params: accountConfigIdParamSchema },
+  responses: {
+    200: { description: "Rotated - webhookSecret is shown here only", content: { "application/json": { schema: accountConfigCreatedResponseSchema } } },
     403: errorResponse("Caller's token does not carry the Super_Admin role"),
     404: errorResponse("Account config not found"),
   },

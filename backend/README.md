@@ -156,11 +156,19 @@ resolved `rate_plan_id` directly). `listAndSyncMappings()` now reads from there 
 came back before.
 
 ### Account config (`/account-config`) - Super_Admin only
-- `POST /account-config` - create a Channex account/webhook config. Generates a random
-  `webhook_secret` server-side and returns it **once**, in this response only - not
-  retrievable again afterward. Requires the caller's GQ token to carry BQ's
-  `Super_Admin` role (passed through as-is from BQ's own login response).
+- `POST /account-config` - create a Channex account/webhook config. Body is just
+  `{bqPropertyId?, sendData?}` - `webhookUrl`/`environment` are derived server-side
+  (`PUBLIC_WEBHOOK_BASE_URL`/`CHANNEX_ENVIRONMENT`), never caller-supplied. Generates a
+  random `webhook_secret` server-side and returns it **once**, in this response only -
+  not retrievable again afterward. Requires the caller's GQ token to carry BQ's
+  `Super_Admin` role (passed through as-is from BQ's own login response). Channex allows
+  only one webhook per property (or one global one), enforced here too via two partial
+  unique indexes on `bq_property_id` - a second create for the same scope returns `409
+  ACCOUNT_CONFIG_SCOPE_TAKEN` pointing at rotate-secret instead.
 - `GET /account-config` - list configs (`webhookSecret` never included).
+- `POST /account-config/:accountConfigId/rotate-secret` - generates a fresh secret for an
+  existing row in place (same id, same `cxWebhookId` once re-registered) - the supported
+  way to change a config's secret, replacing create-another-row-and-deactivate-the-old-one.
 
 ### Monitoring (`/monitoring`) - Super_Admin only
 Plain, unfiltered, account-wide audit trails - none of these 4 tables carry a
@@ -214,16 +222,21 @@ Channex's own `revision_id` (`gq_ota_booking_revision.cx_revision_id` is unique)
 already-created BQ booking is never re-created even on a retried "new" revision.
 
 **One-time setup required before this can receive anything:**
+0. Set `PUBLIC_WEBHOOK_BASE_URL` in `.env` to your public, internet-reachable origin
+   (ngrok tunnel in dev, real domain in prod) - GQ appends `/api/gq/webhooks/channex`
+   itself. This is the only place the callback URL is configured.
 1. Create a `gq_account_config` row via the admin API (there are none yet - every
    webhook call is rejected with `401` until one exists):
    ```bash
    TOKEN=$(node scripts/mint-test-token.js 1)   # roles: ["Super_Admin"]
    curl -s -X POST http://localhost:4000/api/gq/account-config \
      -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-     -d '{"webhookUrl":"https://<your-public-host>/api/gq/webhooks/channex","apiKey":"<channex-api-key>","environment":"production"}'
+     -d '{"bqPropertyId":1}'
    ```
    Copy `webhookSecret` from the response - it's shown **once** and never returned
-   again (`GET /account-config` redacts it on every later read).
+   again (`GET /account-config` redacts it on every later read). To change it later,
+   use `POST /account-config/:accountConfigId/rotate-secret` on the same row rather
+   than creating a new one.
 2. Register the webhook with Channex - no manual curl needed, GQ does the
    `POST {CHANNEX_BASE_URL}/webhooks` call for you:
    `POST /api/gq/account-config/:accountConfigId/register-with-channex` (same

@@ -19,15 +19,11 @@ export interface AccountConfigResponseDto {
 }
 
 /**
- * existingActiveConfigsForUrl warns at creation time, before any Channex call happens -
- * Channex allows only one webhook per (callback_url, event_mask) pair, so creating
- * another config for a URL that already has an active one just sets up the same
- * adoption/shared-secret situation as RegisterAccountConfigResponseDto, one step
- * earlier. 0 means this URL is new.
+ * Returned by both createAccountConfig() and rotateAccountConfigSecret() - either way,
+ * a brand new secret was just generated and this is the only time it's ever shown.
  */
 export interface AccountConfigCreatedResponseDto extends AccountConfigResponseDto {
   webhookSecret: string;
-  existingActiveConfigsForUrl: number;
 }
 
 /**
@@ -55,11 +51,8 @@ export function toAccountConfigResponseDto(row: gq_account_config): AccountConfi
   };
 }
 
-export function toAccountConfigCreatedResponseDto(
-  row: gq_account_config,
-  existingActiveConfigsForUrl: number
-): AccountConfigCreatedResponseDto {
-  return { ...toAccountConfigResponseDto(row), webhookSecret: row.webhook_secret, existingActiveConfigsForUrl };
+export function toAccountConfigCreatedResponseDto(row: gq_account_config): AccountConfigCreatedResponseDto {
+  return { ...toAccountConfigResponseDto(row), webhookSecret: row.webhook_secret };
 }
 
 export function toRegisterAccountConfigResponseDto(

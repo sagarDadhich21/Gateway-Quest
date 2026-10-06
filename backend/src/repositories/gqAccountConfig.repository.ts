@@ -5,7 +5,6 @@ export interface CreateAccountConfigInput {
   bq_property_id: number | null;
   webhook_url: string;
   webhook_secret: string;
-  api_key: string;
   environment: string;
   send_data: boolean;
 }
@@ -54,14 +53,16 @@ export async function countOtherActiveConfigsWithWebhookId(cxWebhookId: string, 
 }
 
 /**
- * Other active rows that already use this exact webhook_url - a pre-registration
- * warning for createAccountConfig(), since Channex allows only one webhook per
- * (callback_url, event_mask) pair, so creating yet another config for a URL that's
- * already active will just converge onto the same Channex webhook once registered (see
- * RegisterAccountConfigResponseDto.sharedWithOtherActiveConfigs).
+ * The one row (if any) for this scope - a real BQ property, or null for the global/
+ * account-wide config. Two partial unique indexes on bq_property_id (applied via raw
+ * SQL, see schema.prisma) guarantee this is ever at most one row, active or not -
+ * createAccountConfig() uses this to point the admin at rotateAccountConfigSecret()
+ * instead of failing on a raw DB constraint violation.
  */
-export async function countActiveConfigsWithWebhookUrl(webhookUrl: string, excludeId: string): Promise<number> {
-  return prisma.gq_account_config.count({
-    where: { webhook_url: webhookUrl, is_active: true, id: { not: excludeId } },
-  });
+export async function findAccountConfigByScope(bqPropertyId: number | null): Promise<gq_account_config | null> {
+  return prisma.gq_account_config.findFirst({ where: { bq_property_id: bqPropertyId } });
+}
+
+export async function setWebhookSecret(id: string, webhookSecret: string): Promise<gq_account_config> {
+  return prisma.gq_account_config.update({ where: { id }, data: { webhook_secret: webhookSecret } });
 }

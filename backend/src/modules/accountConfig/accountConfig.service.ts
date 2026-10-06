@@ -6,7 +6,8 @@ import {
   updateChannexWebhook,
 } from "../../clients/channex/channex.client";
 import { ChannexWebhookCreateRequest } from "../../clients/channex/channex.types";
-import { AppError, accountConfigNotFoundError } from "../../errors/AppError";
+import { env } from "../../config/env";
+import { AppError, accountConfigNotFoundError, accountConfigScopeTakenError } from "../../errors/AppError";
 import { WEBHOOK_SECRET_HEADER } from "../booking/booking.routes";
 import * as accountConfigRepo from "../../repositories/gqAccountConfig.repository";
 import { logger } from "../../services/logger";
@@ -20,40 +21,76 @@ import {
 } from "./accountConfig.dto";
 import { CreateAccountConfigInput } from "./accountConfig.schema";
 
+const WEBHOOK_PATH = "/api/gq/webhooks/channex";
+
+function generateWebhookSecret(): string {
+  return randomBytes(32).toString("hex");
+}
+
 /**
  * The webhook secret is always generated here, never accepted from the request body -
  * that's the only way to guarantee it's actually random rather than whatever a caller
  * happens to type in. It's returned once, on creation, and never again (see
  * AccountConfigResponseDto).
+ *
+ * webhookUrl/apiKey/environment are no longer caller-supplied (see
+ * createAccountConfigSchema's comment) - webhookUrl is always derived from
+ * env.PUBLIC_WEBHOOK_BASE_URL, environment always mirrors env.CHANNEX_ENVIRONMENT, and
+ * there is no apiKey column at all any more (it was never read by anything).
+ *
+ * Two partial unique indexes on bq_property_id (schema.prisma) guarantee at most one row
+ * per scope at the database level - this pre-checks the same thing first so a caller
+ * gets a clear 409 pointing at rotateAccountConfigSecret() instead of a raw constraint
+ * violation.
  */
 export async function createAccountConfig(
   input: CreateAccountConfigInput,
   correlationId: string
 ): Promise<AccountConfigCreatedResponseDto> {
-  const webhookSecret = randomBytes(32).toString("hex");
+  const bqPropertyId = input.bqPropertyId ?? null;
+
+  const existing = await accountConfigRepo.findAccountConfigByScope(bqPropertyId);
+  if (existing) {
+    throw accountConfigScopeTakenError(existing.id);
+  }
 
   const row = await accountConfigRepo.createAccountConfig({
-    bq_property_id: input.bqPropertyId ?? null,
-    webhook_url: input.webhookUrl,
-    webhook_secret: webhookSecret,
-    api_key: input.apiKey,
-    environment: input.environment,
+    bq_property_id: bqPropertyId,
+    webhook_url: `${env.PUBLIC_WEBHOOK_BASE_URL}${WEBHOOK_PATH}`,
+    webhook_secret: generateWebhookSecret(),
+    environment: env.CHANNEX_ENVIRONMENT,
     send_data: input.sendData ?? false,
   });
 
-  const existingActiveConfigsForUrl = await accountConfigRepo.countActiveConfigsWithWebhookUrl(
-    row.webhook_url,
-    row.id
-  );
+  logger.info("gq_account_config_created", { correlationId, accountConfigId: row.id, bqPropertyId: row.bq_property_id });
 
-  logger.info("gq_account_config_created", {
-    correlationId,
-    accountConfigId: row.id,
-    bqPropertyId: row.bq_property_id,
-    existingActiveConfigsForUrl,
-  });
+  return toAccountConfigCreatedResponseDto(row);
+}
 
-  return toAccountConfigCreatedResponseDto(row, existingActiveConfigsForUrl);
+/**
+ * Generates a fresh secret for an EXISTING config, in place - same row, same id, same
+ * cx_webhook_id once re-registered. This is the supported way to change a config's
+ * secret: it replaces the old create-a-new-row-and-remember-to-deactivate-the-old-one
+ * dance (the actual source of the duplicate-row pileup this table kept accumulating)
+ * with a single action on the one row that scope will ever have. The new secret isn't
+ * live on Channex until registerAccountConfigWithChannex() is called again - exactly the
+ * same two-step shape creating a config already had, so the exposure window (between
+ * generating the secret here and clicking Register) is no larger than it already was.
+ */
+export async function rotateAccountConfigSecret(
+  id: string,
+  correlationId: string
+): Promise<AccountConfigCreatedResponseDto> {
+  const row = await accountConfigRepo.findAccountConfigById(id);
+  if (!row) {
+    throw accountConfigNotFoundError();
+  }
+
+  const updated = await accountConfigRepo.setWebhookSecret(id, generateWebhookSecret());
+
+  logger.info("gq_account_config_secret_rotated", { correlationId, accountConfigId: id });
+
+  return toAccountConfigCreatedResponseDto(updated);
 }
 
 export async function listAccountConfigs(): Promise<AccountConfigResponseDto[]> {
@@ -154,7 +191,13 @@ export async function registerAccountConfigWithChannex(
     property_id: cxPropertyId,
     is_global: cxPropertyId === null,
     headers: { [WEBHOOK_SECRET_HEADER]: row.webhook_secret },
-    is_active: row.is_active,
+    // Always true, deliberately NOT row.is_active - registering is the explicit act of
+    // making this webhook live on Channex, and row.is_active is GQ's own, separate,
+    // local on/off switch for findActiveWebhookSecrets() (see setAccountConfigActive's
+    // own comment). Coupling the two meant deactivating a config locally, then later
+    // re-registering it, would silently push is_active:false to the real Channex
+    // webhook too - a real bug, not the documented "local only" behavior.
+    is_active: true,
     send_data: row.send_data,
   };
 

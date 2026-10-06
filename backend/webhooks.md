@@ -19,20 +19,44 @@ duplicated between the live and recovery paths.
 
 ## One-time setup (required before anything can be received)
 
+0. **Set `PUBLIC_WEBHOOK_BASE_URL`** in `.env` to your public, internet-reachable
+   origin (an ngrok tunnel in dev, your real domain in prod) - GQ appends the
+   fixed `/api/gq/webhooks/channex` path itself. This is the only place the
+   callback URL is configured; it is never typed into a form, which is what
+   used to cause duplicate/stale `gq_account_config` rows every time someone
+   mistyped it or reused a stale tunnel URL.
+
 1. **Create a `gq_account_config` row via the admin API** (`POST
-   /api/gq/account-config`, requires a GQ token with the `admin` role) - there
-   are none yet, so every webhook call is rejected with `401
+   /api/gq/account-config`, requires a GQ token with the `Super_Admin` role) -
+   there are none yet, so every webhook call is rejected with `401
    WEBHOOK_UNAUTHORIZED` until at least one active row exists:
    ```bash
    TOKEN=$(node scripts/mint-test-token.js 1)   # roles: ["Super_Admin"]
    curl -s -X POST http://localhost:4000/api/gq/account-config \
      -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-     -d '{"webhookUrl":"https://<your-public-host>/api/gq/webhooks/channex","apiKey":"<channex-api-key>","environment":"production"}'
+     -d '{"bqPropertyId":1}'
    ```
-   The response's `webhookSecret` is shown **once** here and never again -
-   `GET /account-config` redacts it on every later read, so copy it now.
-   The secret itself is generated server-side (random, not caller-supplied),
-   so it can't accidentally be weak or guessable.
+   `bqPropertyId` is optional (omit it for a global config covering every
+   property); `webhookUrl`/`environment` are never accepted here - they're
+   always derived server-side from `PUBLIC_WEBHOOK_BASE_URL` and
+   `CHANNEX_ENVIRONMENT`. The response's `webhookSecret` is shown **once**
+   here and never again - `GET /account-config` redacts it on every later
+   read, so copy it now. The secret itself is generated server-side (random,
+   not caller-supplied), so it can't accidentally be weak or guessable.
+   Channex allows only one webhook per property (or one global one), so
+   there can be at most one `gq_account_config` row per scope too - creating
+   a second one for the same property returns `409
+   ACCOUNT_CONFIG_SCOPE_TAKEN`; use step 1a instead.
+
+1a. **Rotating a secret** - `POST
+    /api/gq/account-config/:accountConfigId/rotate-secret` (same token, no
+    body) generates a fresh secret for that **existing** row in place (same
+    id, same `cxWebhookId` once re-registered) and returns it once, just like
+    creation does. This is the supported way to change a config's secret -
+    it replaces create-a-new-row-and-remember-to-deactivate-the-old-one,
+    which was the actual source of the duplicate rows this table used to
+    accumulate. The new secret isn't live on Channex until you register again
+    (step 2).
 
 2. **Register the webhook with Channex** - one click, no manual curl needed:
    `POST /api/gq/account-config/:accountConfigId/register-with-channex`
@@ -41,11 +65,10 @@ duplicated between the live and recovery paths.
    attached under the `x-channex-webhook-secret` header, and persists the
    returned webhook id as `cx_webhook_id`. In the frontend, this is the
    **"Register with Channex"** button on the webhook-secret popup shown right
-   after creating a config (Connection page), or the per-row **Register**
-   action for a config created earlier. Safe to call again (e.g. after
-   editing the URL) - Channex has no update endpoint, so this always creates
-   a new registration and overwrites `cx_webhook_id` with the latest one; the
-   old registration is left on Channex's side.
+   after creating (or rotating) a config (Connection page), or the per-row
+   **Register**/**Re-register** action. Safe to call again: if already
+   registered, updates the existing Channex webhook in place (`PUT`) rather
+   than creating a second one.
 
    Channex has **no cryptographic signature scheme** for webhooks (confirmed
    directly from their own docs) - this shared-secret header comparison is
@@ -62,28 +85,37 @@ duplicated between the live and recovery paths.
 ## Account config API (Super_Admin only)
 
 - `POST /api/gq/account-config` - create a config, generates `webhookSecret`
-  server-side (random, 32 bytes hex), returned once in the response.
+  server-side (random, 32 bytes hex), returned once in the response. Body is
+  just `{"bqPropertyId"?: number, "sendData"?: boolean}` -
+  `webhookUrl`/`environment` are never accepted (see step 0/1 above).
+  `409 ACCOUNT_CONFIG_SCOPE_TAKEN` if a row already exists for this scope -
+  two partial unique indexes on `bq_property_id` enforce at most one row per
+  property, and at most one global row, at the database level (schema.prisma).
 - `GET /api/gq/account-config` - list configs; `webhookSecret` is always
   redacted here.
+- `POST /api/gq/account-config/:accountConfigId/rotate-secret` - generates a
+  new secret for an existing row in place (see step 1a above); returned once,
+  same as creation.
 - `POST /api/gq/account-config/:accountConfigId/register-with-channex` -
   registers the config's `callback_url`/secret with Channex for real
   (`404 ACCOUNT_CONFIG_NOT_FOUND` if the id doesn't exist); resolves the real
   Channex property id via BQ when the config is property-scoped, otherwise
   registers as a global (`is_global: true`) webhook; stores the returned
-  webhook id as `cxWebhookId` in the response. Channex allows only **one**
-  webhook per `(callback_url, event_mask)` pair, so if another config already
-  registered this same URL, this adopts that existing webhook instead of
-  failing - the response's `sharedWithOtherActiveConfigs` then tells you how
-  many other active configs share it. Since Channex only keeps one secret per
-  webhook, only the most recently registered config's secret is actually
-  live; deactivate the others (see below).
+  webhook id as `cxWebhookId` in the response. Always registers as active on
+  Channex regardless of this config's own `isActive` flag - that flag is a
+  separate, GQ-local on/off switch (see the `PATCH .../active` entry below),
+  not something registration should silently push to the real webhook.
+  Channex allows only **one** webhook per `(callback_url, event_mask)` pair;
+  since the database constraints above already prevent two GQ rows from
+  targeting the same URL/scope, `sharedWithOtherActiveConfigs` on the
+  response should always read `0` in normal operation - a nonzero value means
+  something outside this flow (a manual Channex dashboard registration, a
+  data anomaly) created a collision.
 - `PATCH /api/gq/account-config/:accountConfigId/active` - body
   `{"isActive": boolean}`. Toggles whether this config's `webhook_secret` is
   checked against inbound Channex calls (`findActiveWebhookSecrets`).
   Deliberately local to GQ only - does **not** touch the Channex-side
-  webhook, which other active configs sharing the same `cxWebhookId` may
-  still depend on. Use this to clean up the duplicate configs left over from
-  re-registering the same URL multiple times.
+  webhook.
 
 Both require the caller's GQ session token to carry BQ's `Super_Admin` role
 (`requireAdmin` middleware) - `403 ADMIN_ONLY` otherwise. `roles` is passed

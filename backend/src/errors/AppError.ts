@@ -29,6 +29,7 @@ export type AppErrorCode =
   | "WEBHOOK_UNAUTHORIZED"
   | "ADMIN_ONLY"
   | "ACCOUNT_CONFIG_NOT_FOUND"
+  | "ACCOUNT_CONFIG_SCOPE_TAKEN"
   | "BQ_UPSTREAM_ERROR"
   | "BQ_UPSTREAM_UNAVAILABLE"
   | "PRICING_SERVICE_UPSTREAM_ERROR"
@@ -156,4 +157,13 @@ export function adminOnlyError(): AppError {
 
 export function accountConfigNotFoundError(): AppError {
   return new AppError("ACCOUNT_CONFIG_NOT_FOUND", 404, "Account config not found.");
+}
+
+export function accountConfigScopeTakenError(existingId: string): AppError {
+  return new AppError(
+    "ACCOUNT_CONFIG_SCOPE_TAKEN",
+    409,
+    "A config already exists for this property (or globally, if none was given) - rotate its secret instead of creating another one.",
+    { existingAccountConfigId: existingId }
+  );
 }

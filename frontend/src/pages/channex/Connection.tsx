@@ -5,6 +5,7 @@ import {
   createAccountConfig,
   listAccountConfigs,
   registerAccountConfigWithChannex,
+  rotateAccountConfigSecret,
   setAccountConfigActive,
 } from "../../api/gqApi";
 import { AccountConfigResponse } from "../../api/types";
@@ -29,7 +30,10 @@ function formatDateTime(iso: string): string {
  * do anything real about (see backend/webhooks.md). Channex's own API key, base URL and
  * rate limits are server-side deployment config, not per-property settings a UI form
  * would manage, and rate limits aren't tracked anywhere in GQ at all - registering the
- * Channex -> GQ webhook is the one real, working piece.
+ * Channex -> GQ webhook is the one real, working piece. webhookUrl/environment are also
+ * server-derived now (env.PUBLIC_WEBHOOK_BASE_URL / env.CHANNEX_ENVIRONMENT) rather than
+ * typed here - a free-text URL field was the actual cause of the duplicate/stale configs
+ * this page used to accumulate, since Channex allows only one webhook per URL.
  */
 export function Connection() {
   const isSuperAdmin = useIsSuperAdmin();
@@ -38,6 +42,7 @@ export function Connection() {
   const [error, setError] = useState<string | null>(null);
   const [registeringId, setRegisteringId] = useState<string | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [rotatingId, setRotatingId] = useState<string | null>(null);
   const { showModal, closeModal } = useModal();
   const toast = useToast();
 
@@ -96,7 +101,7 @@ export function Connection() {
     }
   }
 
-  function showSecret(id: string, secret: string, existingActiveConfigsForUrl: number) {
+  function showSecret(id: string, secret: string) {
     let registering = false;
     let registerError: string | null = null;
     let registered = false;
@@ -115,14 +120,6 @@ export function Connection() {
               paste it into Channex's webhook <code>headers</code> field as{" "}
               <code>x-channex-webhook-secret</code> yourself.
             </p>
-            {!registered && existingActiveConfigsForUrl > 0 && (
-              <p className="form-error">
-                {existingActiveConfigsForUrl} other active config(s) already use this exact webhook URL.
-                Channex allows only one webhook per URL, so registering this one will adopt the same
-                Channex webhook as those — making this the only secret that's actually live. Consider
-                deactivating the others instead of keeping both.
-              </p>
-            )}
             {registerError && <p className="form-error">{registerError}</p>}
             {registered && sharedWithOtherActiveConfigs === 0 && (
               <p className="small" style={{ color: "var(--success, green)" }}>
@@ -200,10 +197,19 @@ export function Connection() {
     rerender();
   }
 
+  async function rotateSecret(id: string) {
+    setRotatingId(id);
+    try {
+      const result = await rotateAccountConfigSecret(id);
+      showSecret(result.id, result.webhookSecret);
+    } catch (err) {
+      toast(extractErrorMessage(err), "warn");
+    } finally {
+      setRotatingId(null);
+    }
+  }
+
   function openCreate() {
-    let webhookUrl = "";
-    let apiKey = "";
-    let environment = "production";
     let bqPropertyId = "";
     let sendData = false;
     let creating = false;
@@ -217,49 +223,13 @@ export function Connection() {
           <>
             <p className="muted small" style={{ marginTop: 0 }}>
               Creates the config <code>POST /webhooks/channex</code> checks incoming
-              Channex calls against. A random secret is generated automatically and
-              shown once, right after creation.
+              Channex calls against. The webhook URL and a random secret are generated
+              automatically - the secret is shown once, right after creation. Channex
+              allows only one webhook per property (or one global one), so there can be
+              at most one config per property here too - use <strong>Rotate secret</strong>{" "}
+              on an existing row instead of creating another one for the same property.
             </p>
             {formError && <p className="form-error">{formError}</p>}
-            <label className="field">
-              <span className="field__label">Webhook URL (your public GQ endpoint)</span>
-              <input
-                type="text"
-                className="field__input"
-                placeholder="https://your-public-host.com/api/gq/webhooks/channex"
-                value={webhookUrl}
-                onChange={(e) => {
-                  webhookUrl = e.target.value;
-                  rerender();
-                }}
-              />
-            </label>
-            <label className="field">
-              <span className="field__label">Channex API key</span>
-              <input
-                type="text"
-                className="field__input"
-                value={apiKey}
-                onChange={(e) => {
-                  apiKey = e.target.value;
-                  rerender();
-                }}
-              />
-            </label>
-            <label className="field">
-              <span className="field__label">Environment</span>
-              <select
-                className="field__input"
-                value={environment}
-                onChange={(e) => {
-                  environment = e.target.value;
-                  rerender();
-                }}
-              >
-                <option value="production">production</option>
-                <option value="staging">staging</option>
-              </select>
-            </label>
             <label className="field">
               <span className="field__label">Property id (optional — leave blank to apply to all properties)</span>
               <input
@@ -298,24 +268,16 @@ export function Connection() {
               className="button button--primary"
               disabled={creating}
               onClick={async () => {
-                if (!webhookUrl.trim() || !apiKey.trim() || !environment.trim()) {
-                  formError = "Webhook URL, API key and environment are required.";
-                  rerender();
-                  return;
-                }
                 creating = true;
                 formError = null;
                 rerender();
                 try {
                   const result = await createAccountConfig({
-                    webhookUrl: webhookUrl.trim(),
-                    apiKey: apiKey.trim(),
-                    environment: environment.trim(),
                     bqPropertyId: bqPropertyId.trim() ? Number(bqPropertyId.trim()) : undefined,
                     sendData,
                   });
                   closeModal();
-                  showSecret(result.id, result.webhookSecret, result.existingActiveConfigsForUrl);
+                  showSecret(result.id, result.webhookSecret);
                   await load();
                 } catch (err) {
                   creating = false;
@@ -367,6 +329,14 @@ export function Connection() {
             onClick={() => registerWithChannex(r.id)}
           >
             {registeringId === r.id ? "Registering…" : r.cxWebhookId ? "Re-register" : "Register"}
+          </button>
+          <button
+            type="button"
+            className="button button--ghost"
+            disabled={rotatingId === r.id}
+            onClick={() => rotateSecret(r.id)}
+          >
+            {rotatingId === r.id ? "…" : "Rotate secret"}
           </button>
           <button
             type="button"

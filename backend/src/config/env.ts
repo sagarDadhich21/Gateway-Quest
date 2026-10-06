@@ -28,6 +28,14 @@ const envSchema = z
     CHANNEX_BASE_URL: z.string().url().optional(),
     CHANNEX_API_KEY: z.string().min(1, "CHANNEX_API_KEY is required"),
 
+    // The public, internet-reachable origin Channex's webhook calls land on (e.g. an
+    // ngrok tunnel in dev, the real domain in prod). Required so the inbound webhook
+    // callback_url is always derived server-side (env.PUBLIC_WEBHOOK_BASE_URL +
+    // "/api/gq/webhooks/channex" in accountConfig.service.ts) rather than typed by hand
+    // on the Connection page - that free-text field was the actual cause of the
+    // duplicate/stale gq_account_config rows this integration kept accumulating.
+    PUBLIC_WEBHOOK_BASE_URL: z.string().url("PUBLIC_WEBHOOK_BASE_URL must be a valid URL"),
+
     UPSTREAM_TIMEOUT_MS: z.coerce.number().int().positive().default(10000),
   })
   .transform((raw) => {

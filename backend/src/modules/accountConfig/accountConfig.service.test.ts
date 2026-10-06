@@ -4,10 +4,11 @@ vi.mock("../../repositories/gqAccountConfig.repository", () => ({
   createAccountConfig: vi.fn(),
   listAccountConfigs: vi.fn(),
   findAccountConfigById: vi.fn(),
+  findAccountConfigByScope: vi.fn(),
   setChannexWebhookId: vi.fn(),
   setAccountConfigActive: vi.fn(),
+  setWebhookSecret: vi.fn(),
   countOtherActiveConfigsWithWebhookId: vi.fn(),
-  countActiveConfigsWithWebhookUrl: vi.fn(),
 }));
 vi.mock("../../clients/bq/bq.client", () => ({
   getBqProperty: vi.fn(),
@@ -24,22 +25,25 @@ import {
   listChannexWebhooks,
   updateChannexWebhook,
 } from "../../clients/channex/channex.client";
+import { env } from "../../config/env";
 import { AppError } from "../../errors/AppError";
 import * as accountConfigRepo from "../../repositories/gqAccountConfig.repository";
 import {
   createAccountConfig,
   listAccountConfigs,
   registerAccountConfigWithChannex,
+  rotateAccountConfigSecret,
   setAccountConfigActive,
 } from "./accountConfig.service";
+
+const EXPECTED_WEBHOOK_URL = `${env.PUBLIC_WEBHOOK_BASE_URL}/api/gq/webhooks/channex`;
 
 const ROW = {
   id: "cfg-1",
   bq_property_id: 1,
-  webhook_url: "https://example.com/webhooks/channex",
+  webhook_url: EXPECTED_WEBHOOK_URL,
   webhook_secret: "should-never-leak-from-list",
-  api_key: "cx-api-key",
-  environment: "production",
+  environment: env.CHANNEX_ENVIRONMENT,
   cx_webhook_id: null,
   is_active: true,
   send_data: false,
@@ -53,26 +57,21 @@ beforeEach(() => {
 
 describe("createAccountConfig", () => {
   beforeEach(() => {
-    vi.mocked(accountConfigRepo.countActiveConfigsWithWebhookUrl).mockResolvedValue(0);
+    vi.mocked(accountConfigRepo.findAccountConfigByScope).mockResolvedValue(null);
   });
 
-  it("generates a random webhook secret and returns it once", async () => {
+  it("derives webhookUrl/environment server-side and generates a random secret, returned once", async () => {
     vi.mocked(accountConfigRepo.createAccountConfig).mockResolvedValue(ROW as never);
 
-    const result = await createAccountConfig(
-      { webhookUrl: "https://example.com/webhooks/channex", apiKey: "cx-api-key", environment: "production" },
-      "corr-1"
-    );
+    const result = await createAccountConfig({}, "corr-1");
 
-    expect(accountConfigRepo.createAccountConfig).toHaveBeenCalledWith(
-      expect.objectContaining({
-        webhook_url: "https://example.com/webhooks/channex",
-        api_key: "cx-api-key",
-        environment: "production",
-        bq_property_id: null,
-        send_data: false,
-      })
-    );
+    expect(accountConfigRepo.createAccountConfig).toHaveBeenCalledWith({
+      webhook_url: EXPECTED_WEBHOOK_URL,
+      environment: env.CHANNEX_ENVIRONMENT,
+      bq_property_id: null,
+      send_data: false,
+      webhook_secret: expect.any(String),
+    });
     const [callArg] = vi.mocked(accountConfigRepo.createAccountConfig).mock.calls[0];
     expect(callArg.webhook_secret).toHaveLength(64);
     expect(result.webhookSecret).toBe(ROW.webhook_secret);
@@ -81,24 +80,53 @@ describe("createAccountConfig", () => {
   it("two calls generate two different secrets", async () => {
     vi.mocked(accountConfigRepo.createAccountConfig).mockResolvedValue(ROW as never);
 
-    await createAccountConfig({ webhookUrl: "https://a.example.com", apiKey: "k", environment: "production" }, "corr-1");
-    await createAccountConfig({ webhookUrl: "https://a.example.com", apiKey: "k", environment: "production" }, "corr-2");
+    await createAccountConfig({}, "corr-1");
+    await createAccountConfig({}, "corr-2");
 
     const [[firstCall], [secondCall]] = vi.mocked(accountConfigRepo.createAccountConfig).mock.calls;
     expect(firstCall.webhook_secret).not.toBe(secondCall.webhook_secret);
   });
 
-  it("warns when another active config already uses this webhook URL", async () => {
+  it("checks for an existing row in this exact scope before creating", async () => {
     vi.mocked(accountConfigRepo.createAccountConfig).mockResolvedValue(ROW as never);
-    vi.mocked(accountConfigRepo.countActiveConfigsWithWebhookUrl).mockResolvedValue(3);
 
-    const result = await createAccountConfig(
-      { webhookUrl: ROW.webhook_url, apiKey: "k", environment: "production" },
-      "corr-1"
-    );
+    await createAccountConfig({ bqPropertyId: 42 }, "corr-1");
 
-    expect(accountConfigRepo.countActiveConfigsWithWebhookUrl).toHaveBeenCalledWith(ROW.webhook_url, ROW.id);
-    expect(result.existingActiveConfigsForUrl).toBe(3);
+    expect(accountConfigRepo.findAccountConfigByScope).toHaveBeenCalledWith(42);
+  });
+
+  it("throws ACCOUNT_CONFIG_SCOPE_TAKEN instead of creating a duplicate for a scope that already has a row", async () => {
+    vi.mocked(accountConfigRepo.findAccountConfigByScope).mockResolvedValue({ ...ROW, id: "existing-cfg" } as never);
+
+    await expect(createAccountConfig({ bqPropertyId: 1 }, "corr-1")).rejects.toMatchObject({
+      code: "ACCOUNT_CONFIG_SCOPE_TAKEN",
+      details: { existingAccountConfigId: "existing-cfg" },
+    });
+    expect(accountConfigRepo.createAccountConfig).not.toHaveBeenCalled();
+  });
+});
+
+describe("rotateAccountConfigSecret", () => {
+  it("throws ACCOUNT_CONFIG_NOT_FOUND when the id doesn't exist", async () => {
+    vi.mocked(accountConfigRepo.findAccountConfigById).mockResolvedValue(null);
+
+    await expect(rotateAccountConfigSecret("missing-id", "corr-1")).rejects.toMatchObject({
+      code: "ACCOUNT_CONFIG_NOT_FOUND",
+    });
+    expect(accountConfigRepo.setWebhookSecret).not.toHaveBeenCalled();
+  });
+
+  it("generates a new secret on the same row and returns it once", async () => {
+    vi.mocked(accountConfigRepo.findAccountConfigById).mockResolvedValue(ROW as never);
+    vi.mocked(accountConfigRepo.setWebhookSecret).mockResolvedValue({ ...ROW, webhook_secret: "rotated-secret" } as never);
+
+    const result = await rotateAccountConfigSecret("cfg-1", "corr-1");
+
+    const [[, newSecret]] = vi.mocked(accountConfigRepo.setWebhookSecret).mock.calls;
+    expect(newSecret).toHaveLength(64);
+    expect(newSecret).not.toBe(ROW.webhook_secret);
+    expect(result.id).toBe(ROW.id);
+    expect(result.webhookSecret).toBe("rotated-secret");
   });
 });
 
@@ -163,6 +191,17 @@ describe("registerAccountConfigWithChannex", () => {
       expect.objectContaining({
         webhook: expect.objectContaining({ property_id: "cx-prop-1", is_global: false }),
       }),
+      "corr-1"
+    );
+  });
+
+  it("always registers as active on Channex, even when the config is deactivated locally", async () => {
+    vi.mocked(accountConfigRepo.findAccountConfigById).mockResolvedValue({ ...ROW, is_active: false } as never);
+
+    await registerAccountConfigWithChannex("cfg-1", "corr-1");
+
+    expect(createChannexWebhook).toHaveBeenCalledWith(
+      expect.objectContaining({ webhook: expect.objectContaining({ is_active: true }) }),
       "corr-1"
     );
   });

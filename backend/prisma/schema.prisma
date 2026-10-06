@@ -33,12 +33,17 @@ model gq_user {
   updated_at DateTime @default(now())
 }
 
+// bq_property_id has two partial unique indexes applied directly via raw SQL (not
+// expressible in Prisma's schema DSL, and `prisma db push` can't be used on this shared
+// database - see backend/webhooks.md): one on bq_property_id WHERE NOT NULL (one row per
+// real property) and one forcing at most one row WHERE bq_property_id IS NULL (one
+// global row) - together, exactly one gq_account_config row per scope, ever. That's what
+// stops the duplicate-row pileup this table kept accumulating before.
 model gq_account_config {
   id             String   @id @default(dbgenerated("(gen_random_uuid())::text"))
   bq_property_id Int?
   webhook_url    String
-  webhook_secret String
-  api_key        String
+  webhook_secret String   @unique
   environment    String
   cx_webhook_id  String?
   is_active      Boolean  @default(true)

@@ -11,6 +11,7 @@ import {
   createAccountConfig,
   listAccountConfigs,
   registerAccountConfigWithChannex,
+  rotateAccountConfigSecret,
   setAccountConfigActive,
 } from "./accountConfig.service";
 
@@ -40,6 +41,15 @@ accountConfigRouter.post(
   asyncHandler(async (req, res) => {
     const { accountConfigId } = accountConfigIdParamSchema.parse(req.params);
     const result = await registerAccountConfigWithChannex(accountConfigId, req.correlationId);
+    res.status(200).json(result);
+  })
+);
+
+accountConfigRouter.post(
+  "/:accountConfigId/rotate-secret",
+  asyncHandler(async (req, res) => {
+    const { accountConfigId } = accountConfigIdParamSchema.parse(req.params);
+    const result = await rotateAccountConfigSecret(accountConfigId, req.correlationId);
     res.status(200).json(result);
   })
 );

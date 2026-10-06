@@ -193,6 +193,11 @@ export async function registerAccountConfigWithChannex(id: string): Promise<Regi
   return response.data;
 }
 
+export async function rotateAccountConfigSecret(id: string): Promise<AccountConfigCreatedResponse> {
+  const response = await apiClient.post<AccountConfigCreatedResponse>(`/account-config/${id}/rotate-secret`);
+  return response.data;
+}
+
 export async function setAccountConfigActive(id: string, isActive: boolean): Promise<AccountConfigResponse> {
   const response = await apiClient.patch<AccountConfigResponse>(`/account-config/${id}/active`, { isActive });
   return response.data;

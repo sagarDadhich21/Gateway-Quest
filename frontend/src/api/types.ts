@@ -260,15 +260,11 @@ export interface AccountConfigResponse {
 }
 
 /**
- * webhookSecret is only ever present here, on the create response - never again afterward.
- * existingActiveConfigsForUrl > 0 means another active config already uses this exact
- * webhookUrl - Channex allows only one webhook per (callback_url, event_mask) pair, so
- * registering this new config will just adopt that same webhook (see
- * RegisterAccountConfigResponse.sharedWithOtherActiveConfigs).
+ * webhookSecret is only ever present here - at creation time, and from
+ * rotateAccountConfigSecret() - never again afterward.
  */
 export interface AccountConfigCreatedResponse extends AccountConfigResponse {
   webhookSecret: string;
-  existingActiveConfigsForUrl: number;
 }
 
 /**
@@ -281,10 +277,13 @@ export interface RegisterAccountConfigResponse extends AccountConfigResponse {
   sharedWithOtherActiveConfigs: number;
 }
 
+/**
+ * webhookUrl/apiKey/environment are not sent here - the backend derives webhookUrl from
+ * its own PUBLIC_WEBHOOK_BASE_URL env var and environment from CHANNEX_ENVIRONMENT;
+ * apiKey was never read by anything (every real Channex call already uses the single
+ * server-level CHANNEX_API_KEY) so it was dropped entirely.
+ */
 export interface CreateAccountConfigRequest {
-  webhookUrl: string;
-  apiKey: string;
-  environment: string;
   bqPropertyId?: number;
   sendData?: boolean;
 }

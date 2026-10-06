@@ -1,10 +1,14 @@
 import { z } from "zod";
 
+// webhookUrl, apiKey and environment are deliberately not accepted from the client -
+// webhookUrl is always env.PUBLIC_WEBHOOK_BASE_URL + the fixed webhook path (a free-text
+// field was the actual cause of the duplicate/stale gq_account_config rows this table
+// kept accumulating), apiKey was never read anywhere (every real Channex call already
+// uses the single server-level CHANNEX_API_KEY), and environment is always
+// env.CHANNEX_ENVIRONMENT (a per-row free-text copy of it could silently disagree with
+// which Channex base URL the server is actually configured against).
 export const createAccountConfigSchema = z.object({
   bqPropertyId: z.coerce.number().int().positive().optional(),
-  webhookUrl: z.string().url("webhookUrl must be a valid URL."),
-  apiKey: z.string().min(1, "apiKey is required."),
-  environment: z.string().min(1, "environment is required."),
   sendData: z.boolean().optional(),
 });
 
